@@ -42,12 +42,6 @@ import com.android.launcher3.quickspace.receivers.QuickSpaceActionReceiver;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
-import android.os.Handler;
-import android.os.Looper;
-import android.text.SpannableString;
-import android.text.Spanned;
-import android.text.style.ForegroundColorSpan;
-import android.graphics.Color;
 
 public class QuickSpaceView extends FrameLayout implements OnDataListener {
 
@@ -71,7 +65,8 @@ public class QuickSpaceView extends FrameLayout implements OnDataListener {
 
     // New fields for large style
     public TextView mQuickspaceDayOfWeek;
-    public TextClock mQuickspaceClock;
+    public TextClock mQuickspaceClockHour;
+    public TextClock mQuickspaceClockMinute;
     public TextView mQuickspaceDate;
     public TextView mPSAMessage;
     public ViewGroup mNowPlayingContent;
@@ -88,64 +83,10 @@ public class QuickSpaceView extends FrameLayout implements OnDataListener {
     private boolean mIsAlternateStyle = false;
     private int mCurrentStyle = -1;
 
-    private boolean mClockColorUpdateActive = false;
-
     public QuickspaceController mController;
 
     private final List<WeakReference<ViewTreeObserver.OnGlobalLayoutListener>> 
         mActiveLayoutListeners = new ArrayList<>();
-
-    private final Handler mClockColorHandler = new Handler(Looper.getMainLooper());
-
-    private final Runnable mClockColorRunnable = new Runnable() {
-        @Override
-        public void run() {
-            try {
-                if (mQuickspaceClock != null && mQuickspaceClock.isAttachedToWindow()) {
-                    updateClockColor();
-                }
-            } catch (Throwable t) {
-                // ignore to avoid crashing UI
-            } finally {
-                // re-run every second
-                if (mClockColorUpdateActive) {
-                    mClockColorHandler.postDelayed(this, 1000);
-                }
-            }
-        }
-    };
-
-    private void updateClockColor() {
-        if (mQuickspaceClock == null) return;
-        
-        CharSequence text = mQuickspaceClock.getText();
-        if (text instanceof Spanned) return;
-        if (text != null) {
-            String time = text.toString();
-            int colon = time.indexOf(':');
-            if (colon > 0) {
-                int hourColor = Color.parseColor("#FE4543");
-                int minuteColor = mQuickspaceClock.getCurrentTextColor();
-                SpannableString styled = new SpannableString(time);
-                styled.setSpan(new ForegroundColorSpan(hourColor), 0, colon, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                styled.setSpan(new ForegroundColorSpan(minuteColor), colon, styled.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                mQuickspaceClock.setText(styled);
-            }
-        }
-    }
-
-    private void startClockColorUpdater() {
-        if (!mClockColorUpdateActive) {
-            mClockColorUpdateActive = true;
-            mClockColorHandler.removeCallbacks(mClockColorRunnable);
-            mClockColorHandler.post(mClockColorRunnable);
-        }
-    }
-
-    private void stopClockColorUpdater() {
-        mClockColorUpdateActive = false;
-        mClockColorHandler.removeCallbacks(mClockColorRunnable);
-    }
 
     public QuickSpaceView(Context context, AttributeSet set) {
         super(context, set);
@@ -199,10 +140,6 @@ public class QuickSpaceView extends FrameLayout implements OnDataListener {
 
         mQuickspaceDayOfWeek.setText(QuickEventsController.getDayOfWeek(getContext()));
         mQuickspaceDate.setText(QuickEventsController.getShortDate(getContext()));
-
-        if (mQuickspaceClock != null) {
-            updateClockColor();
-        }
         
         if (mWeatherContentSub != null) {
             mWeatherContentSub.setVisibility(View.VISIBLE);
@@ -425,7 +362,8 @@ public class QuickSpaceView extends FrameLayout implements OnDataListener {
             mGreetingsExt = (TextView) findViewById(R.id.extended_greetings);
         } else if (mCurrentStyle == 2) { // Large style
             mQuickspaceDayOfWeek = findViewById(R.id.quickspace_day_of_week);
-            mQuickspaceClock = findViewById(R.id.quickspace_clock);
+            mQuickspaceClockHour = findViewById(R.id.quickspace_clock_hour);
+            mQuickspaceClockMinute = findViewById(R.id.quickspace_clock_minute);
             mQuickspaceDate = findViewById(R.id.quickspace_date);
             mPSAMessage = findViewById(R.id.quickspace_psa_message);
             mNowPlayingContent = findViewById(R.id.now_playing_content);
@@ -561,7 +499,6 @@ public class QuickSpaceView extends FrameLayout implements OnDataListener {
     @Override
     public void onAttachedToWindow() {
         super.onAttachedToWindow();
-        startClockColorUpdater();
 
         if (mDestroyed) return;
         
@@ -583,9 +520,6 @@ public class QuickSpaceView extends FrameLayout implements OnDataListener {
             }
         }
         
-        // Stop clock color updates to avoid leaks
-        stopClockColorUpdater();
-        
         super.onDetachedFromWindow();
     }
 
@@ -595,10 +529,6 @@ public class QuickSpaceView extends FrameLayout implements OnDataListener {
         if (mDestroyed || mController == null) return;
         
         loadViews();
-
-        if (mQuickspaceClock != null) {
-            startClockColorUpdater();
-        }
 
         mFinishedInflate = true;
         if (isAttachedToWindow() && !mListenerRegistered) {
@@ -614,10 +544,6 @@ public class QuickSpaceView extends FrameLayout implements OnDataListener {
     public void onResume() {
         if (mDestroyed) return;
         if (mController != null && mListenerRegistered) mController.onResume();
-        if (mQuickspaceClock != null) {
-            updateClockColor();
-            startClockColorUpdater();
-        }
     }
 
     public void onDestroy() {

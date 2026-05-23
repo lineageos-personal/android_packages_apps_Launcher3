@@ -23,17 +23,36 @@
         launcher:keyShadowOffsetX="0.5dip" />
 
     <!-- Clock -->
-    <TextClock
-        android:id="@+id/quickspace_clock"
+    <LinearLayout
         android:paddingStart="10dp"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:fontFamily="@font/SlateForOnePlus-Bold"
-        android:textColor="?workspaceTextColor"
-        android:textSize="80sp"
-        android:format12Hour="h:mm"
-        android:format24Hour="H:mm"
-        android:includeFontPadding="false" />
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextClock
+            android:id="@+id/quickspace_clock_hour"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="@font/SlateForOnePlus-Bold"
+            android:textColor="#FE4543"
+            android:textSize="80sp"
+            android:format12Hour="h"
+            android:format24Hour="H"
+            android:includeFontPadding="false" />
+
+        <TextClock
+            android:id="@+id/quickspace_clock_minute"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="@font/SlateForOnePlus-Bold"
+            android:textColor="?workspaceTextColor"
+            android:textSize="80sp"
+            android:format12Hour=":mm"
+            android:format24Hour=":mm"
+            android:includeFontPadding="false" />
+
+    </LinearLayout>
 
     <!-- Date and Weather Row -->
     <LinearLayout
