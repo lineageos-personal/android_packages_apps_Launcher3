@@ -37,7 +37,6 @@ import com.android.launcher3.homescreenfiles.HomeScreenFilesProvider
 import com.android.launcher3.icons.IconCache
 import com.android.launcher3.icons.IconChangeTracker
 import com.android.launcher3.icons.LauncherIcons.IconPool
-import com.android.launcher3.icons.ThirdPartyIconProvider
 import com.android.launcher3.logging.FileLog
 import com.android.launcher3.model.tasks.PackageUpdatedTask
 import com.android.launcher3.model.tasks.ShortcutsChangedTask
@@ -69,7 +68,6 @@ constructor(
     private val themeManager: ThemeManager,
     private val userCache: UserCache,
     private val settingsCache: SettingsCache,
-    private val iconProvider: ThirdPartyIconProvider,
     private val customWidgetManager: CustomWidgetManager,
     private val installSessionHelper: InstallSessionHelper,
     private val homeScreenFilesProvider: HomeScreenFilesProvider,
@@ -148,11 +146,6 @@ constructor(
 
         // Custom widgets
         lifeCycle.addCloseable(customWidgetManager.addWidgetRefreshCallback(model::rebindCallbacks))
-
-        // lawnicon support
-        lifeCycle.addCloseable(
-            iconProvider.registerPackageChangeListener()
-        )
 
         // Install session changes
         lifeCycle.addCloseable(installSessionHelper.registerInstallTracker(modelCallbacks))

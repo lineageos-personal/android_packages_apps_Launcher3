@@ -19,8 +19,6 @@ import static android.view.View.INVISIBLE;
 import static android.view.View.VISIBLE;
 
 import static com.android.launcher3.Flags.refactorTaskbarUiState;
-import static com.android.launcher3.taskbar.TaskbarManagerImpl.GESTURE_NAVBAR_HEIGHT_MODE_URI;
-import static com.android.launcher3.taskbar.TaskbarManagerImpl.GESTURE_NAVBAR_LENGTH_MODE_URI;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
@@ -44,7 +42,6 @@ import com.android.launcher3.taskbar.bubbles.stashing.BubbleStashController;
 import com.android.launcher3.util.Executors;
 import com.android.launcher3.util.MultiPropertyFactory;
 import com.android.launcher3.util.MultiValueAlpha;
-import com.android.launcher3.util.SettingsCache;
 import com.android.wm.shell.shared.animation.PhysicsAnimator;
 import com.android.wm.shell.shared.bubbles.BubbleBarLocation;
 import com.android.wm.shell.shared.handles.RegionSamplingHelper;
@@ -102,38 +99,10 @@ public class BubbleStashedHandleViewController {
 
         DeviceProfile deviceProfile = mActivity.getDeviceProfile();
         Resources resources = mActivity.getResources();
-
-        int handleHeightMode = SettingsCache.INSTANCE.get(mActivity)
-            .getIntValue(GESTURE_NAVBAR_HEIGHT_MODE_URI, 3);
-        if (handleHeightMode == 0) {
-            mStashedHandleHeight =
-                resources.getDimensionPixelSize(R.dimen.taskbar_stashed_handle_height_smallest);
-        } else if (handleHeightMode == 1) {
-            mStashedHandleHeight =
-                resources.getDimensionPixelSize(R.dimen.taskbar_stashed_handle_height_smaller);
-        } else if (handleHeightMode == 2) {
-            mStashedHandleHeight =
-                resources.getDimensionPixelSize(R.dimen.taskbar_stashed_handle_height_small);
-        } else if (handleHeightMode == 4) {
-            mStashedHandleHeight =
-                resources.getDimensionPixelSize(R.dimen.taskbar_stashed_handle_height_tall);
-        } else {
-            mStashedHandleHeight =
-                resources.getDimensionPixelSize(R.dimen.bubblebar_stashed_handle_height);
-        }
-
-        int handleWidthMode = SettingsCache.INSTANCE.get(mActivity)
-            .getIntValue(GESTURE_NAVBAR_LENGTH_MODE_URI, 1);
-        if (handleWidthMode == 0) {
-            mStashedHandleWidth = resources.getDimensionPixelSize(
-                R.dimen.bubblebar_stashed_handle_width_short);
-        } else if (handleWidthMode == 2) {
-            mStashedHandleWidth = resources.getDimensionPixelSize(
-                R.dimen.bubblebar_stashed_handle_width_long);
-        } else {
-            mStashedHandleWidth = resources.getDimensionPixelSize(
+        mStashedHandleHeight = resources.getDimensionPixelSize(
+                R.dimen.bubblebar_stashed_handle_height);
+        mStashedHandleWidth = resources.getDimensionPixelSize(
                 R.dimen.bubblebar_stashed_handle_width);
-        }
 
         int barSize = resources.getDimensionPixelSize(R.dimen.bubblebar_size);
         // Use the max translation for bubble bar whether it is on the home screen or in app.

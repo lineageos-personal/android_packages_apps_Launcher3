@@ -21,8 +21,6 @@ import static android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BA
 import static com.android.launcher3.EncryptionType.ENCRYPTED;
 import static com.android.launcher3.LauncherPrefs.nonRestorableItem;
 import static com.android.launcher3.taskbar.TaskbarDesktopExperienceFlags.enableAutoStashConnectedDisplayTaskbar;
-import static com.android.launcher3.taskbar.TaskbarManagerImpl.GESTURE_NAVBAR_HEIGHT_MODE_URI;
-import static com.android.launcher3.taskbar.TaskbarManagerImpl.GESTURE_NAVBAR_LENGTH_MODE_URI;
 import static com.android.launcher3.taskbar.TaskbarManagerImpl.NAVIGATION_BAR_HINT_URI;
 import static com.android.launcher3.taskbar.Utilities.getShapedTaskbarRadius;
 import static com.android.systemui.shared.system.QuickStepContract.SYSUI_STATE_NAV_BAR_HIDDEN;
@@ -37,10 +35,6 @@ import android.graphics.Outline;
 import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.UserHandle;
-import android.provider.Settings;
-import android.view.animation.AccelerateInterpolator;
-import android.view.animation.DecelerateInterpolator;
 import android.view.View;
 import android.view.ViewOutlineProvider;
 
@@ -80,11 +74,7 @@ public class StashedHandleViewController implements TaskbarControllers.LoggableT
     public static final int ALPHA_INDEX_HIDDEN_WHILE_DREAMING = 3;
     public static final int ALPHA_INDEX_NUDGED = 4;
     public static final int ALPHA_INDEX_ALL_SET_TRANSITION = 5;
-    public static final int ALPHA_INDEX_AUTO_HIDE = 6;
-    private static final int NUM_ALPHA_CHANNELS = 7;
-    private static final long AUTO_HIDE_TIMEOUT_MS = 4500;
-    private static final long AUTO_HIDE_FADE_DURATION_MS = 750;
-    private static final long AUTO_HIDE_FADE_IN_DURATION_MS = 150;
+    private static final int NUM_ALPHA_CHANNELS = 6;
 
     // Values for long press animations, picked to most closely match navbar spec.
     private static final float SCALE_TOUCH_ANIMATION_SHRINK = 0.85f;
@@ -103,7 +93,7 @@ public class StashedHandleViewController implements TaskbarControllers.LoggableT
     private final LauncherPrefs mPrefs;
     private final StashedHandleView mStashedHandleView;
     private int mStashedHandleWidth;
-    private int mStashedHandleHeight;
+    private final int mStashedHandleHeight;
     @Nullable
     private RegionSamplingHelper mRegionSamplingHelper;
     private final MultiValueAlpha mTaskbarStashedHandleAlpha;
@@ -132,9 +122,6 @@ public class StashedHandleViewController implements TaskbarControllers.LoggableT
     private float mTranslationYForSwipe;
     private float mTranslationYForStash;
     private TaskStackChangeListener mTaskStackChangeListener;
-    private final Runnable mAutoHideHandleRunnable;
-    @Nullable
-    private ValueAnimator mAutoHideFadeAnimator;
 
     // Burn-in protection
     private Timer mBurnInTimer;
@@ -156,9 +143,9 @@ public class StashedHandleViewController implements TaskbarControllers.LoggableT
         mTaskbarStashedHandleAlpha = new MultiValueAlpha(mStashedHandleView, NUM_ALPHA_CHANNELS);
         final Resources resources = mActivity.getResources();
         mTaskbarStashedHandleAlpha.setUpdateVisibility(true);
-        mAutoHideHandleRunnable = this::fadeOutStashedHandle;
         mStashedHandleView.updateHandleColor(
                 mPrefs.get(STASHED_HANDLE_REGION_IS_DARK), false /* animate */);
+        mStashedHandleHeight = resources.getDimensionPixelSize(R.dimen.taskbar_stashed_handle_height);
         mBurnInProtectionEnabled = resources.getBoolean(R.bool.config_enableBurnInProtection);
         mBurnInShiftIntervalMs = resources.getInteger(R.integer.config_burnInProtectionShiftInterval) * 1000L;
 
@@ -173,53 +160,15 @@ public class StashedHandleViewController implements TaskbarControllers.LoggableT
         mControllers = controllers;
         DeviceProfile deviceProfile = mActivity.getDeviceProfile();
         Resources resources = mActivity.getResources();
-
-        int handleHeightMode = SettingsCache.INSTANCE.get(mActivity)
-            .getIntValue(GESTURE_NAVBAR_HEIGHT_MODE_URI, 3);
-        if (handleHeightMode == 0) {
-            mStashedHandleHeight =
-                resources.getDimensionPixelSize(R.dimen.taskbar_stashed_handle_height_smallest);
-        } else if (handleHeightMode == 1) {
-            mStashedHandleHeight =
-                resources.getDimensionPixelSize(R.dimen.taskbar_stashed_handle_height_smaller);
-        } else if (handleHeightMode == 2) {
-            mStashedHandleHeight =
-                resources.getDimensionPixelSize(R.dimen.taskbar_stashed_handle_height_small);
-        } else if (handleHeightMode == 4) {
-            mStashedHandleHeight =
-                resources.getDimensionPixelSize(R.dimen.taskbar_stashed_handle_height_tall);
-        } else {
-            mStashedHandleHeight =
-                resources.getDimensionPixelSize(R.dimen.taskbar_stashed_handle_height);
-        }
-
-        int handleWidthMode = SettingsCache.INSTANCE.get(mActivity)
-            .getIntValue(GESTURE_NAVBAR_LENGTH_MODE_URI, 1);
         if (mActivity.isPhoneGestureNavMode() || mActivity.isTinyTaskbar()
                 || mActivity.isBubbleBarOnPhone()) {
             mTaskbarSize = resources.getDimensionPixelSize(R.dimen.taskbar_phone_size);
-            if (handleWidthMode == 0) {
-                mStashedHandleWidth =
-                    resources.getDimensionPixelSize(R.dimen.taskbar_stashed_small_screen_short);
-            } else if (handleWidthMode == 2) {
-                mStashedHandleWidth =
-                    resources.getDimensionPixelSize(R.dimen.taskbar_stashed_small_screen_long);
-            } else {
-                mStashedHandleWidth =
+            mStashedHandleWidth =
                     resources.getDimensionPixelSize(R.dimen.taskbar_stashed_small_screen);
-             }
         } else {
             mTaskbarSize = deviceProfile.getTaskbarProfile().getHeight();
-            if (handleWidthMode == 0) {
-                mStashedHandleWidth = resources
-                    .getDimensionPixelSize(R.dimen.taskbar_stashed_handle_width_short);
-            } else if (handleWidthMode == 2) {
-                mStashedHandleWidth = resources
-                    .getDimensionPixelSize(R.dimen.taskbar_stashed_handle_width_long);
-            } else {
-                mStashedHandleWidth = resources
+            mStashedHandleWidth = resources
                     .getDimensionPixelSize(R.dimen.taskbar_stashed_handle_width);
-            }
         }
         int taskbarBottomMargin = deviceProfile.getTaskbarProfile().getBottomMargin();
         mStashedHandleView.getLayoutParams().height =
@@ -259,7 +208,7 @@ public class StashedHandleViewController implements TaskbarControllers.LoggableT
         if (mActivity.isPrimaryDisplay()) {
             initRegionSampler();
         }
-        if (!mActivity.isThreeButtonNav()) {
+        if (mActivity.isPhoneGestureNavMode()) {
             onIsStashedChanged(true);
         }
         if (!mActivity.isPrimaryDisplay() && enableAutoStashConnectedDisplayTaskbar.isTrue()) {
@@ -300,9 +249,8 @@ public class StashedHandleViewController implements TaskbarControllers.LoggableT
                 }, Executors.UI_HELPER_EXECUTOR);
     }
 
+
     public void onDestroy() {
-        mStashedHandleView.removeCallbacks(mAutoHideHandleRunnable);
-        cancelAutoHideFade();
         if (mRegionSamplingHelper != null) {
             mRegionSamplingHelper.stopAndDestroy();
         }
@@ -367,7 +315,6 @@ public class StashedHandleViewController implements TaskbarControllers.LoggableT
     public void onIsStashedChanged(boolean isStashed) {
         mIsStashed = isStashed;
         updateSamplingState();
-        updateAutoHideForCurrentState(isStashed /* resetTimer */);
     }
 
     public void onNavigationBarLumaSamplingEnabled(int displayId, boolean enable) {
@@ -382,9 +329,6 @@ public class StashedHandleViewController implements TaskbarControllers.LoggableT
     public void setIsAppTransitionPending(boolean pending) {
         mIsAppTransitionPending = pending;
         updateSamplingState();
-        if (!pending) {
-            updateAutoHideForCurrentState(true /* resetTimer */);
-        }
     }
 
     private void updateSamplingState() {
@@ -440,79 +384,8 @@ public class StashedHandleViewController implements TaskbarControllers.LoggableT
     }
 
     public void updateStateForSysuiFlags(@SystemUiStateFlags long systemUiStateFlags) {
-        boolean wasTaskbarHidden = mTaskbarHidden;
         mTaskbarHidden = (systemUiStateFlags & SYSUI_STATE_NAV_BAR_HIDDEN) != 0;
         updateRegionSamplingWindowVisibility();
-        updateAutoHideForCurrentState(wasTaskbarHidden && !mTaskbarHidden /* resetTimer */);
-    }
-
-    public void touchAutoHide(boolean resetTimer) {
-        updateAutoHideForCurrentState(resetTimer);
-    }
-
-    private void updateAutoHideForCurrentState(boolean resetTimer) {
-        if (!shouldAutoHideHandle()) {
-            mStashedHandleView.removeCallbacks(mAutoHideHandleRunnable);
-            fadeInStashedHandle();
-            return;
-        }
-
-        if (!mIsStashed || mTaskbarHidden) {
-            mStashedHandleView.removeCallbacks(mAutoHideHandleRunnable);
-            fadeInStashedHandle();
-            return;
-        }
-
-        if (!resetTimer) {
-            return;
-        }
-
-        mStashedHandleView.removeCallbacks(mAutoHideHandleRunnable);
-        fadeInStashedHandle();
-        mStashedHandleView.postDelayed(mAutoHideHandleRunnable, AUTO_HIDE_TIMEOUT_MS);
-    }
-
-    private void fadeOutStashedHandle() {
-        cancelAutoHideFade();
-        var alphaChannel = mTaskbarStashedHandleAlpha.get(ALPHA_INDEX_AUTO_HIDE);
-        float startAlpha = alphaChannel.getValue();
-        if (startAlpha == 0f) return;
-
-        mAutoHideFadeAnimator = ValueAnimator.ofFloat(startAlpha, 0f);
-        mAutoHideFadeAnimator.setDuration(AUTO_HIDE_FADE_DURATION_MS);
-        mAutoHideFadeAnimator.setInterpolator(new AccelerateInterpolator());
-        mAutoHideFadeAnimator.addUpdateListener(
-                anim -> alphaChannel.setValue((float) anim.getAnimatedValue()));
-        mAutoHideFadeAnimator.start();
-    }
-
-    private void fadeInStashedHandle() {
-        cancelAutoHideFade();
-        var alphaChannel = mTaskbarStashedHandleAlpha.get(ALPHA_INDEX_AUTO_HIDE);
-        float startAlpha = alphaChannel.getValue();
-        if (startAlpha == 1f) return;
-
-        mAutoHideFadeAnimator = ValueAnimator.ofFloat(startAlpha, 1f);
-        mAutoHideFadeAnimator.setDuration(AUTO_HIDE_FADE_IN_DURATION_MS);
-        mAutoHideFadeAnimator.setInterpolator(new DecelerateInterpolator());
-        mAutoHideFadeAnimator.addUpdateListener(
-                anim -> alphaChannel.setValue((float) anim.getAnimatedValue()));
-        mAutoHideFadeAnimator.start();
-    }
-
-    private void cancelAutoHideFade() {
-        if (mAutoHideFadeAnimator != null) {
-            mAutoHideFadeAnimator.cancel();
-            mAutoHideFadeAnimator = null;
-        }
-    }
-
-    private boolean shouldAutoHideHandle() {
-        return !mActivity.isThreeButtonNav()
-                && SettingsCache.INSTANCE.get(mActivity).getValue(NAVIGATION_BAR_HINT_URI)
-                && Settings.System.getIntForUser(mActivity.getContentResolver(),
-                        Settings.System.GESTURE_NAVBAR_AUTO_HIDE, 0,
-                        UserHandle.USER_CURRENT) == 1;
     }
 
     private void updateRegionSamplingWindowVisibility() {

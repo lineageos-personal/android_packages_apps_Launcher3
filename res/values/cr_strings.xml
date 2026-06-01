@@ -17,7 +17,7 @@
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
 
     <!-- Application name -->
-    <string name="crdroid_app_name" translatable="false">Lunaris Launcher</string>
+    <string name="crdroid_app_name" translatable="false">LOSP Launcher</string>
 
     <!-- Folder titles -->
     <string name="google_folder_title" translatable="false">Google</string>
@@ -184,13 +184,6 @@
     <string name="recents_lens_title">Share</string>
     <string name="recents_task_corner_radius_title">Task corner radius</string>
     <string name="recents_task_corner_radius_default">Default</string>
-
-    <!-- Freeform gesture -->
-    <string name="freeform_gesture_title">Use gesture in recents to start freeform mode</string>
-    <string name="freeform_gesture_summary">Swipe up from the app and release at the top of the recents screen to trigger freeform mode</string>
-    <string name="freeform_gesture_progress_title">Freeform swipe threshold</string>
-    <string name="freeform_gesture_progress_summary">Lower values trigger freeform earlier, higher values require swiping closer to the top</string>
-    <string name="freeform_gesture_threshold_reached">Release to launch floating window</string>
 
     <!-- Parallax -->
     <string name="short_parallax_title">Allow short parallax</string>
@@ -362,12 +355,12 @@
         <item>Oh hey, what\'s up?</item>
         <item>Welcome to real Matrix!</item>
         <item>How many screenshots do you take?</item>
-        <item>Open goodness with Lunaris</item>
+        <item>Open goodness with LOSP</item>
         <item>Spread love, not havoc</item>
         <item>We didn\'t start the fire!</item>
         <item>Time for some good music</item>
         <item>\u003C\u003C\u003C\u003C\u003C\u003C\u003C HEAD</item>
-        <item>You need Lunaris Premium to see this</item>
+        <item>You need LOSP Premium to see this</item>
         <item>Remember the Lineage of the Unicorn</item>
         <item>Enjoy Xtended battery life</item>
         <item>Starting from the ground zero</item>
