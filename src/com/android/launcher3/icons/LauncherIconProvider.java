@@ -84,7 +84,8 @@ public class LauncherIconProvider extends IconProvider {
     public void updateSystemState() {
         super.updateSystemState();
         mSystemState += "," + mThemeManager.getIconState().toUniqueId()
-            + Build.VERSION.INCREMENTAL;
+            + Build.VERSION.INCREMENTAL
+            + ",icon-pack-shape-v2";
     }
 
     private Map<String, ThemeData> getThemedIconMap() {
