@@ -26,8 +26,6 @@ import static com.android.launcher3.logging.StatsLogManager.LauncherEvent.LAUNCH
 import static com.android.launcher3.util.SplitConfigurationOptions.STAGE_POSITION_BOTTOM_OR_RIGHT;
 
 import android.app.ActivityOptions;
-import android.content.ComponentName;
-import android.content.Intent;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -49,8 +47,6 @@ import androidx.annotation.Nullable;
 
 import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.R;
-import com.android.launcher3.SecondaryDropTarget;
-import com.android.launcher3.Utilities;
 import com.android.launcher3.logging.StatsLogManager.LauncherEvent;
 import com.android.launcher3.model.WellbeingModel;
 import com.android.launcher3.popup.SystemShortcut;
@@ -305,30 +301,6 @@ public interface TaskShortcutFactory {
         }
     }
 
-    class FloatingTaskShortcut extends SystemShortcut<RecentsViewContainer> {
-        private final TaskView mTaskView;
-
-        public FloatingTaskShortcut(RecentsViewContainer container, TaskContainer taskContainer) {
-            super(R.drawable.picture_in_picture_mobile_24px, R.string.recent_task_option_freeform,
-                    container, taskContainer.getItemInfo(), taskContainer.getTaskView());
-            mTaskView = taskContainer.getTaskView();
-        }
-
-        @Override
-        public void onClick(View view) {
-            dismissTaskMenuView();
-            Task task = mTaskView.getFirstTask();
-            RecentsView rv = mTarget.getOverviewPanel();
-            rv.switchToScreenshot(() -> {
-                rv.finishRecentsAnimation(true /* toRecents */, false /* shouldPip */, () -> {
-                    mTarget.returnToHomescreen();
-                    rv.getHandler().post(() -> Utilities.startLmoFreeform(view.getContext(),
-                            task.getTopComponent(), task.key.userId, task.key.id));
-                });
-            });
-        }
-    }
-
     /**
      * Does NOT add split options in the following scenarios:
      * * 1. Taskbar is not present AND aren't at least 2 tasks in overview to show split options for
@@ -455,19 +427,6 @@ public interface TaskShortcutFactory {
 
         private boolean isAvailable(RecentsViewContainer container) {
             return false;
-        }
-    };
-
-    TaskShortcutFactory FLOATING = new TaskShortcutFactory() {
-        @Override
-        public List<SystemShortcut> getShortcuts(RecentsViewContainer container,
-                TaskContainer taskContainer) {
-            final Task task  = taskContainer.getTask();
-            if (!task.isDockable) {
-                return null;
-            }
-
-            return Collections.singletonList(new FloatingTaskShortcut(container, taskContainer));
         }
     };
 

@@ -31,7 +31,7 @@ import android.media.session.PlaybackState;
 import android.text.TextUtils;
 import android.util.Log;
 
-import com.android.internal.util.lunaris.OmniJawsClient;
+import com.android.internal.util.losp.OmniJawsClient;
 
 import com.android.launcher3.LauncherPrefs;
 import com.android.launcher3.R;
