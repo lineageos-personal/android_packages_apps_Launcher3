@@ -215,11 +215,11 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
 
     public static final long APP_LAUNCH_DURATION = 450;
 
-    private static final long APP_LAUNCH_ALPHA_DURATION = 80;
-    private static final long APP_LAUNCH_ALPHA_START_DELAY = 15;
+    private static final long APP_LAUNCH_ALPHA_DURATION = 100;
+    private static final long APP_LAUNCH_ALPHA_START_DELAY = 28;
 
     public static final int ANIMATION_NAV_FADE_IN_DURATION = 266;
-    public static final int ANIMATION_NAV_FADE_OUT_DURATION = 133;
+    public static final int ANIMATION_NAV_FADE_OUT_DURATION = 160;
     public static final long ANIMATION_DELAY_NAV_FADE_IN =
             APP_LAUNCH_DURATION - ANIMATION_NAV_FADE_IN_DURATION;
     public static final Interpolator NAV_FADE_IN_INTERPOLATOR =
@@ -746,7 +746,7 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
 
                 ObjectAnimator scaleAnim = ObjectAnimator.ofFloat(view, SCALE_PROPERTY, scale)
                         .setDuration(CONTENT_SCALE_DURATION);
-                scaleAnim.setInterpolator(DECELERATE_1_7);
+                scaleAnim.setInterpolator(DECELERATE_1_5);
                 launcherAnimator.play(scaleAnim);
             });
 
@@ -1729,7 +1729,7 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
         boolean isFreeform = isFreeformAnimation(appTargets);
         float translateY = isFreeform
             ? mClosingFreeformWindowTransY
-            : mClosingWindowTransY * 1.2f;
+            : mClosingWindowTransY * 1.0f;
         float endScale = isFreeform ? 0.95f : 0.97f;
         Interpolator alphaInterpolator = isFreeform
                 ? clampToDuration(LINEAR, 0, 100, duration)
@@ -2522,11 +2522,11 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
         }
 
         private static final Interpolator CORNER_LEAD_INTERPOLATOR =
-        new PathInterpolator(0.2f, 0f, 0.2f, 1f);
+        new PathInterpolator(0.05f, 0f, 0.1f, 1f);
 
         public float getCornerRadius(float progress) {
             float curvedProgress = CORNER_LEAD_INTERPOLATOR.getInterpolation(progress);
-            return mStartRadius + progress * (mEndRadius - mStartRadius);
+            return mStartRadius + curvedProgress * (mEndRadius - mStartRadius);
         }
 
         @Override
@@ -2585,7 +2585,7 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
         protected float getWindowAlpha(float progress) {
             // Alpha interpolates between [1, 0] between progress values [start, end]
             final float start = 0f;
-            final float end = 0.75f;
+            final float end = 0.85f;
 
             if (progress <= start) {
                 return 1f;
