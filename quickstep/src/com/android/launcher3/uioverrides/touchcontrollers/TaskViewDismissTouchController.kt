@@ -272,7 +272,7 @@ CONTAINER : StatefulContainer<T> {
         )
 
     override fun onDrag(displacement: Float): Boolean {
-        taskBeingDragged ?: return false
+        val taskBeingDragged = taskBeingDragged ?: return false
         val currentDisplacement = displacement + initialDisplacement
         val boundedDisplacement =
             boundToRange(abs(currentDisplacement), 0f, dismissLength.toFloat())
@@ -289,7 +289,10 @@ CONTAINER : StatefulContainer<T> {
             } * verticalFactor
         val dismissFraction = displacement / (dismissLength * verticalFactor).toFloat()
         taskDragDisplacementValue?.input = totalDisplacement
-        RECENTS_SCALE_PROPERTY.setValue(recentsView, getRecentsScale(dismissFraction))
+        RECENTS_SCALE_PROPERTY.setValue(
+            recentsView,
+            getRecentsScale(taskBeingDragged, dismissFraction),
+        )
         playDismissThresholdHaptic(displacement)
         return true
     }
@@ -361,7 +364,10 @@ CONTAINER : StatefulContainer<T> {
         allowDetach = true
     }
 
-    private fun getRecentsScale(dismissFraction: Float): Float {
+    private fun getRecentsScale(taskView: TaskView, dismissFraction: Float): Float {
+        if (recentsView.isOverlapStyleActive && taskView !== recentsView.currentPageTaskView) {
+            return RECENTS_SCALE_DEFAULT
+        }
         return when {
             // Do not scale recents when dragging below origin.
             dismissFraction <= 0 -> {

@@ -2300,13 +2300,12 @@ public abstract class RecentsView<
     }
 
     protected void removeAllTaskViews() {
-        LockedTaskManager lockedMgr = LockedTaskManager.getInstance(getContext());
         // This handles an edge case where applyLoadPlan happens during a gesture when the only
         // Task is one with excludeFromRecents, in which case we should not remove it.
         CollectionsKt
                 .filter(getTaskViews(),
                         taskView -> {
-                            if (taskView.isLocked()) return false;
+                            if (isTaskViewLockedForClearAll(taskView)) return false;
                             return !isGestureActive() || !taskView.isRunningTask();
                         })
                 .forEach(this::removeView);
@@ -2314,6 +2313,90 @@ public abstract class RecentsView<
             removeView(mAddDesktopButton);
             removeView(mClearAllButton);
         }
+    }
+
+    public boolean isTaskViewLockedForClearAll(TaskView taskView) {
+        if (taskView == null || taskView.isLocked()) {
+            return taskView != null;
+        }
+        LockedTaskManager lockedMgr = LockedTaskManager.getInstance(getContext());
+        GroupTask groupTask = taskView.getGroupTask();
+        if (groupTask != null) {
+            for (Task task : groupTask.getTasks()) {
+                if (lockedMgr.isPackageLocked(task.key.getPackageName())) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        Task task = taskView.getFirstTask();
+        return task != null && lockedMgr.isPackageLocked(task.key.getPackageName());
+    }
+
+    public boolean shouldDismissTaskOnClearAll(TaskView taskView) {
+        return !isTaskViewLockedForClearAll(taskView);
+    }
+
+    public boolean hasLockedTaskViewsForClearAll() {
+        for (TaskView taskView : getTaskViews()) {
+            if (isTaskViewLockedForClearAll(taskView)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public void finishClearAllWithLockedTaskViews() {
+        for (TaskView taskView : getTaskViews()) {
+            if (shouldDismissTaskOnClearAll(taskView)) {
+                GroupTask groupTask = taskView.getGroupTask();
+                if (groupTask != null) {
+                    removeGroupTaskInternal(groupTask);
+                } else {
+                    Task task = taskView.getFirstTask();
+                    if (task != null) {
+                        ActivityManagerWrapper.getInstance().removeTask(task.key.id);
+                    }
+                }
+            }
+        }
+
+        resetTaskVisuals();
+        mAnyTaskHasBeenDismissed = true;
+        removeAllTaskViews();
+
+        if (!hasTaskViews()) {
+            if (!mUtils.isInDesktopFirstMode()) {
+                startHome();
+            }
+            onDismissAnimationEnds();
+            mTaskViewsDismissPrimaryTranslations.clear();
+            return;
+        }
+
+        updateTaskSize();
+        mUtils.updateChildTaskOrientations();
+        updateScrollSynchronously();
+
+        TaskView highestVisibleTaskView = getHighestVisibleTaskView();
+        if (showAsGrid() && highestVisibleTaskView != null) {
+            updateGridProperties(highestVisibleTaskView);
+            updateScrollSynchronously();
+        }
+
+        int pageToSnapTo = getFirstTaskViewIndex();
+        if (pageToSnapTo != INVALID_PAGE) {
+            pageBeginTransition();
+            setCurrentPage(pageToSnapTo);
+            dispatchScrollChanged();
+            updateActionsViewFocusedScroll();
+            if (!mContainer.getDeviceProfile().getDeviceProperties().isTablet()) {
+                mActionsView.updateDisabledFlags(OverviewActionsView.DISABLED_SCROLLING, false);
+            }
+        }
+        updateCurrentTaskActionsVisibility();
+        onDismissAnimationEnds();
+        mTaskViewsDismissPrimaryTranslations.clear();
     }
 
     /** Returns true if there are at least one TaskView has been added to the RecentsView. */
@@ -4620,12 +4703,10 @@ public abstract class RecentsView<
             throw new IllegalStateException("Another pending animation is still running");
         }
         PendingAnimation anim = new PendingAnimation(duration);
-        LockedTaskManager lockedMgr = LockedTaskManager.getInstance(getContext());
+        boolean hasLockedTaskViews = hasLockedTaskViewsForClearAll();
 
         for (TaskView taskView : getTaskViews()) {
-            String pkg = taskView.getFirstTask() != null
-                    ? taskView.getFirstTask().key.getPackageName() : null;
-            if (pkg != null && lockedMgr.isPackageLocked(pkg)) {
+            if (!shouldDismissTaskOnClearAll(taskView)) {
                 continue;
             }
             addDismissedTaskAnimations(taskView, duration, anim);
@@ -4634,21 +4715,26 @@ public abstract class RecentsView<
         mPendingAnimation = anim;
         mPendingAnimation.addEndListener(isSuccess -> {
             if (isSuccess) {
-                // Remove desktops first, since desks can be empty (so they have no recent tasks),
-                // and closing all tasks on a desk doesn't always necessarily mean that the desk
-                // will be removed. So, there are no guarantees that the below call to
-                // `ActivityManagerWrapper::removeAllRecentTasks()` will be enough.
-                SystemUiProxy.INSTANCE.get(getContext()).removeAllDesks(
-                        DesktopModeTransitionSource.RECENTS);
-
-                // Remove all the task views now
-                finishRecentsAnimation(true /* toHome */, false /* shouldPip */, () -> {
-                    UI_HELPER_EXECUTOR.getHandler().post(
-                            ActivityManagerWrapper.getInstance()::removeAllRecentTasks);
-                    removeAllTaskViews();
-                    startHome();
+                if (hasLockedTaskViews) {
+                    finishClearAllWithLockedTaskViews();
                     InteractionJankMonitorWrapper.end(Cuj.CUJ_LAUNCHER_OVERVIEW_CLEAR_ALL);
-                });
+                } else {
+                    // Remove desktops first, since desks can be empty (so they have no recent
+                    // tasks), and closing all tasks on a desk doesn't always necessarily mean that
+                    // the desk will be removed. So, there are no guarantees that the below call to
+                    // `ActivityManagerWrapper::removeAllRecentTasks()` will be enough.
+                    SystemUiProxy.INSTANCE.get(getContext()).removeAllDesks(
+                            DesktopModeTransitionSource.RECENTS);
+
+                    // Remove all the task views now
+                    finishRecentsAnimation(true /* toHome */, false /* shouldPip */, () -> {
+                        UI_HELPER_EXECUTOR.getHandler().post(
+                                ActivityManagerWrapper.getInstance()::removeAllRecentTasks);
+                        removeAllTaskViews();
+                        startHome();
+                        InteractionJankMonitorWrapper.end(Cuj.CUJ_LAUNCHER_OVERVIEW_CLEAR_ALL);
+                    });
+                }
             }
             mPendingAnimation = null;
         });
@@ -5254,6 +5340,34 @@ public abstract class RecentsView<
 
     public boolean isOverlapStyleActive() {
         return mEnableOverlap && mEnableDrawingLiveTile;
+    }
+
+    public boolean shouldKeepTaskBehindLiveTileOnTouch(TaskView taskView) {
+        if (taskView == null || !mEnableOverlap || showAsGrid()
+                || mContainer.getDeviceProfile().getDeviceProperties().isTablet()) {
+            return false;
+        }
+        TaskView frontTaskView = getRunningTaskView();
+        if (frontTaskView == null) {
+            frontTaskView = getCurrentPageTaskView();
+        }
+        return frontTaskView != null && taskView != frontTaskView;
+    }
+
+    public void enforceTaskTouchZOrder(TaskView touchedTaskView) {
+        TaskView frontTaskView = getRunningTaskView();
+        if (frontTaskView == null) {
+            frontTaskView = getCurrentPageTaskView();
+        }
+        if (frontTaskView == null || touchedTaskView == frontTaskView) {
+            return;
+        }
+        if (frontTaskView.getTranslationZ() < 24f) {
+            frontTaskView.setTranslationZ(24f);
+        }
+        if (touchedTaskView.getTranslationZ() > -24f) {
+            touchedTaskView.setTranslationZ(-24f);
+        }
     }
 
     public boolean isStackRecentsStyleActive() {

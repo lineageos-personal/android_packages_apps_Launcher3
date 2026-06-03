@@ -711,7 +711,15 @@ constructor(
                 y = ev.y
             }
         }
-        return super.dispatchTouchEvent(ev)
+        val keepBehindLiveTile = recentsView.shouldKeepTaskBehindLiveTileOnTouch(this)
+        if (keepBehindLiveTile) {
+            recentsView.enforceTaskTouchZOrder(this)
+        }
+        return super.dispatchTouchEvent(ev).also {
+            if (keepBehindLiveTile) {
+                recentsView.enforceTaskTouchZOrder(this)
+            }
+        }
     }
 
     override fun draw(canvas: Canvas) {

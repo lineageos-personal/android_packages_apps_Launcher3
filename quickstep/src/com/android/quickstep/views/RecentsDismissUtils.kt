@@ -35,7 +35,6 @@ import com.android.launcher3.util.DynamicResource
 import com.android.launcher3.util.MSDLPlayerWrapper
 import com.android.launcher3.util.OverviewReleaseFlags.enableGridOnlyOverview
 import com.android.launcher3.views.ActivityContext
-import com.android.quickstep.LockedTaskManager
 import com.android.quickstep.SystemUiProxy
 import com.android.quickstep.util.TaskGridNavHelper
 import com.android.quickstep.views.RecentsView.RECENTS_SCALE_PROPERTY
@@ -323,40 +322,120 @@ constructor(
 
     /** Dismisses all */
     fun dismissAllTasks() {
-        val lockedPkgMgr = LockedTaskManager.getInstance(recentsView.context)
+        val hasLockedTaskViews = recentsView.hasLockedTaskViewsForClearAll()
         val allDismissSprings =
             recentsView.mUtils.taskViews
                 .reversed()
-                .filter { taskView ->
-                    recentsView.isTaskViewVisible(taskView) &&
-                        !lockedPkgMgr.isPackageLocked(
-                            taskView.firstTask?.key?.packageName ?: return@filter false
-                        )
-                }
+                .filter { taskView -> recentsView.shouldDismissTaskOnClearAll(taskView) }
                 .mapNotNull { createDismissedTaskViewSpringAnimation(it) }
         SpringSet(SpringAnimation(FloatValueHolder()).setSpring(SpringForce(1f)))
             .playTogether(allDismissSprings)
             .addEndListener {
                 with(recentsView) {
-                    // Remove desktops first, since desks can be empty (so they have no recent
-                    // tasks), and closing all tasks on a desk doesn't always necessarily mean that
-                    // the desk will be removed. So, there are no guarantees that the below call to
-                    // `ActivityManagerWrapper::removeAllRecentTasks()` will be enough.
-                    systemUiProxy.removeAllDesks(DesktopModeTransitionSource.RECENTS)
-
-                    // Remove all the task views now
-                    finishRecentsAnimation(/* toHome */ true, /* shouldPip */ false) {
-                        uiHelperExecutor.execute { activityManagerWrapper.removeAllRecentTasks() }
-                        removeAllTaskViews()
-                        if (!mUtils.isInDesktopFirstMode()) {
-                            startHome()
-                        }
-                        onDismissAnimationEnds()
+                    if (hasLockedTaskViews) {
+                        val previousScales = captureTaskScales(
+                            taskViews.filter { !shouldDismissTaskOnClearAll(it) }
+                        )
+                        finishClearAllWithLockedTaskViews()
+                        animateTaskScales(previousScales)
                         InteractionJankMonitorWrapper.end(Cuj.CUJ_LAUNCHER_OVERVIEW_CLEAR_ALL)
+                    } else {
+                        // Remove desktops first, since desks can be empty (so they have no recent
+                        // tasks), and closing all tasks on a desk doesn't always necessarily mean
+                        // that the below call to `removeAllRecentTasks()` will be enough.
+                        systemUiProxy.removeAllDesks(DesktopModeTransitionSource.RECENTS)
+
+                        // Remove all the task views now
+                        finishRecentsAnimation(/* toHome */ true, /* shouldPip */ false) {
+                            uiHelperExecutor.execute { activityManagerWrapper.removeAllRecentTasks() }
+                            removeAllTaskViews()
+                            if (!mUtils.isInDesktopFirstMode()) {
+                                startHome()
+                            }
+                            onDismissAnimationEnds()
+                            InteractionJankMonitorWrapper.end(Cuj.CUJ_LAUNCHER_OVERVIEW_CLEAR_ALL)
+                        }
                     }
                 }
             }
             .start()
+    }
+
+    private fun captureTaskScales(taskViews: List<TaskView>): Map<Int, Pair<Float, Float>> {
+        if (com.android.launcher3.LauncherPrefs.RECENTS_STYLE.get(recentsView.context) == "default") {
+            return emptyMap()
+        }
+        return taskViews.associate { it.taskViewId to (it.scaleX to it.scaleY) }
+    }
+
+    private fun animateTaskScales(previousScales: Map<Int, Pair<Float, Float>>) {
+        if (previousScales.isEmpty()) {
+            return
+        }
+        val scaleAnimators = java.util.ArrayList<android.animation.Animator>()
+        val currentAnimatedScalesX = mutableMapOf<Int, Float>()
+        val currentAnimatedScalesY = mutableMapOf<Int, Float>()
+
+        recentsView.taskViews.forEach { taskView ->
+            val previousScale = previousScales[taskView.taskViewId] ?: return@forEach
+            val targetScaleX = taskView.scaleX
+            val targetScaleY = taskView.scaleY
+            val startScaleX = previousScale.first
+            val startScaleY = previousScale.second
+
+            if (startScaleX != targetScaleX) {
+                currentAnimatedScalesX[taskView.taskViewId] = startScaleX
+                taskView.scaleX = startScaleX
+                val animator = android.animation.ValueAnimator.ofFloat(startScaleX, targetScaleX)
+                animator.addUpdateListener { anim ->
+                    val value = anim.animatedValue as Float
+                    currentAnimatedScalesX[taskView.taskViewId] = value
+                    taskView.scaleX = value
+                }
+                scaleAnimators.add(animator)
+            }
+            if (startScaleY != targetScaleY) {
+                currentAnimatedScalesY[taskView.taskViewId] = startScaleY
+                taskView.scaleY = startScaleY
+                val animator = android.animation.ValueAnimator.ofFloat(startScaleY, targetScaleY)
+                animator.addUpdateListener { anim ->
+                    val value = anim.animatedValue as Float
+                    currentAnimatedScalesY[taskView.taskViewId] = value
+                    taskView.scaleY = value
+                }
+                scaleAnimators.add(animator)
+            }
+        }
+        if (scaleAnimators.isEmpty()) {
+            return
+        }
+
+        val preDrawListener = object : android.view.ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                recentsView.taskViews.forEach { taskView ->
+                    currentAnimatedScalesX[taskView.taskViewId]?.let { taskView.scaleX = it }
+                    currentAnimatedScalesY[taskView.taskViewId]?.let { taskView.scaleY = it }
+                }
+                return true
+            }
+        }
+        recentsView.viewTreeObserver.addOnPreDrawListener(preDrawListener)
+
+        android.animation.AnimatorSet().apply {
+            playTogether(scaleAnimators)
+            duration = 300
+            interpolator = android.view.animation.PathInterpolator(0.33f, 1f, 0.68f, 1f)
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    recentsView.viewTreeObserver.removeOnPreDrawListener(preDrawListener)
+                    recentsView.taskViews.forEach { taskView ->
+                        currentAnimatedScalesX[taskView.taskViewId]?.let { taskView.scaleX = it }
+                        currentAnimatedScalesY[taskView.taskViewId]?.let { taskView.scaleY = it }
+                    }
+                }
+            })
+            start()
+        }
     }
 
     /** Bounce neighboring tasks due to a canceled dismiss or the reflow of tasks after dismiss. */
