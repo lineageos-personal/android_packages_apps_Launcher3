@@ -272,7 +272,7 @@ CONTAINER : StatefulContainer<T> {
         )
 
     override fun onDrag(displacement: Float): Boolean {
-        taskBeingDragged ?: return false
+        val taskBeingDragged = taskBeingDragged ?: return false
         val currentDisplacement = displacement + initialDisplacement
         val boundedDisplacement =
             boundToRange(abs(currentDisplacement), 0f, dismissLength.toFloat())
