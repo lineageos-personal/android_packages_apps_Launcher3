@@ -187,7 +187,7 @@ public class AppsSearchContainerLayout extends ExtendedEditText
                 setCompoundDrawablesRelativeWithIntrinsicBounds(gIconThemed, null, lensThemed, null);
             }
         } else {
-            setCompoundDrawablesRelativeWithIntrinsicBounds(sIcon, null, lens, null);
+            setCompoundDrawablesRelativeWithIntrinsicBounds(sIcon, null, null, null);
         }
 
         setOnTouchListener(new OnTouchListener() {
