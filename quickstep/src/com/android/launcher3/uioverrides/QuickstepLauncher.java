@@ -736,6 +736,22 @@ public class QuickstepLauncher extends Launcher implements RecentsViewContainer,
     }
 
     @Override
+    protected void onUserPresent() {
+        super.onUserPresent();
+        if (mAppTransitionManager != null) {
+            mAppTransitionManager.onUserPresent();
+        }
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (mAppTransitionManager != null) {
+            mAppTransitionManager.onLauncherWindowFocusChanged(hasFocus);
+        }
+    }
+
+    @Override
     public void bindWorkspaceComponentsRemoved(Predicate<ItemInfo> matcher) {
         super.bindWorkspaceComponentsRemoved(matcher);
         mHotseatPredictionController.onModelItemsRemoved(matcher);

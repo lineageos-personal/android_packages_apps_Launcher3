@@ -136,6 +136,7 @@ import com.android.launcher3.DeviceProfile.OnDeviceProfileChangeListener;
 import com.android.launcher3.LauncherAnimationRunner.RemoteAnimationFactory;
 import com.android.launcher3.anim.AnimationSuccessListener;
 import com.android.launcher3.anim.AnimatorListeners;
+import com.android.launcher3.anim.AnimatorPlaybackController;
 import com.android.launcher3.compat.AccessibilityManagerCompat;
 import com.android.launcher3.dragndrop.DragLayer;
 import com.android.launcher3.icons.FastBitmapDrawable;
@@ -230,6 +231,8 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
     public static final int RECENTS_LAUNCH_DURATION = 336;
     private static final int LAUNCHER_RESUME_START_DELAY = 100;
     private static final int CLOSING_TRANSITION_DURATION_MS = 280;
+    private static final int WORKSPACE_UNLOCK_REVEAL_VERIFY_INTERVAL_MS = 50;
+    private static final int WORKSPACE_UNLOCK_REVEAL_VERIFY_ATTEMPTS = 20;
     public static final int SPLIT_LAUNCH_DURATION = 370;
     public static final int SPLIT_DIVIDER_ANIM_DURATION = 100;
 
@@ -311,7 +314,7 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
                 @Override
                 public void setUnlockAmount(float amount, boolean forceIfAnimating) {
                     MAIN_EXECUTOR.execute(() -> {
-                        if (mKeyguardUnlockAnimator == null || forceIfAnimating) {
+                        if (mKeyguardUnlockAnimationController == null || forceIfAnimating) {
                             setWorkspaceUnlockRevealAmount(amount);
                         }
                     });
@@ -319,14 +322,18 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
 
                 @Override
                 public void playUnlockAnimation(boolean unlocked, long duration, long startDelay) {
-                    MAIN_EXECUTOR.execute(() -> playWorkspaceUnlockReveal(unlocked, startDelay,
-                            false));
+                    // SystemUI has already accounted for keyguard timing; don't delay the
+                    // launcher-side reveal again.
+                    MAIN_EXECUTOR.execute(() -> playWorkspaceUnlockReveal(unlocked,
+                            false /* animateDepth */));
                 }
 
                 @Override
                 public void playUnlockAnimationWithWallpaperDepth(boolean unlocked, long duration,
                         long startDelay, boolean animateWallpaperDepth) {
-                    MAIN_EXECUTOR.execute(() -> playWorkspaceUnlockReveal(unlocked, startDelay,
+                    // SystemUI has already accounted for keyguard timing; don't delay the
+                    // launcher-side reveal again.
+                    MAIN_EXECUTOR.execute(() -> playWorkspaceUnlockReveal(unlocked,
                             animateWallpaperDepth));
                 }
 
@@ -339,7 +346,11 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
                 @Override
                 public void dispatchSmartspaceStateToSysui() { }
             };
-    private AnimatorSet mKeyguardUnlockAnimator;
+    private AnimatorPlaybackController mKeyguardUnlockAnimationController;
+    private boolean mHasPlayedWorkspaceUnlockReveal;
+    private boolean mWorkspaceUnlockRevealPrepared;
+    private int mWorkspaceUnlockRevealVerifyAttempts;
+    private final Runnable mWorkspaceUnlockRevealStateVerifier;
 
     public QuickstepTransitionManager(QuickstepLauncher launcher) {
         mLauncher = launcher;
@@ -356,6 +367,7 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
 
         mLauncher.addOnDeviceProfileChangeListener(this);
         mSystemUiProxy = SystemUiProxy.INSTANCE.get(mLauncher);
+        mWorkspaceUnlockRevealStateVerifier = this::verifyWorkspaceUnlockRevealState;
         mSystemUiProxy.setLauncherUnlockAnimationController(
                 mLauncher.getComponentName().getClassName(), mLauncherUnlockAnimationController);
 
@@ -1992,39 +2004,76 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
     public void onScreenOnChanged(boolean isOn) {
         if (isOn && SystemUiFlagUtils.isLocked(mSystemUiProxy.getLastSystemUiStateFlags())) {
             prepareWorkspaceUnlockReveal();
+            scheduleWorkspaceUnlockRevealStateVerifier();
         } else {
             cancelWorkspaceUnlockReveal();
         }
     }
 
+    public void onLauncherWindowFocusChanged(boolean hasFocus) {
+        if (hasFocus && mWorkspaceUnlockRevealPrepared
+                && mKeyguardUnlockAnimationController == null) {
+            finishWorkspaceUnlockReveal();
+        }
+    }
+
+    public void onUserPresent() {
+        if (mKeyguardUnlockAnimationController == null
+                || !mKeyguardUnlockAnimationController.getAnimationPlayer().isRunning()) {
+            finishWorkspaceUnlockReveal();
+        }
+    }
+
     private void prepareWorkspaceUnlockReveal() {
         cancelWorkspaceUnlockReveal(false /* resetViews */);
+        mHasPlayedWorkspaceUnlockReveal = false;
+        mWorkspaceUnlockRevealPrepared = true;
+        mWorkspaceUnlockRevealVerifyAttempts = 0;
         setWorkspaceUnlockRevealAmount(0f);
     }
 
-    private void playWorkspaceUnlockReveal(boolean unlocked, long startDelay, boolean animateDepth) {
+    private void playWorkspaceUnlockReveal(boolean unlocked, boolean animateDepth) {
         if (!unlocked) {
             prepareWorkspaceUnlockReveal();
             return;
         }
+        if (mKeyguardUnlockAnimationController != null || mHasPlayedWorkspaceUnlockReveal) {
+            return;
+        }
 
+        mHandler.removeCallbacks(mWorkspaceUnlockRevealStateVerifier);
+        mHasPlayedWorkspaceUnlockReveal = true;
         setWorkspaceUnlockRevealAmount(0f);
-        mKeyguardUnlockAnimator = new WorkspaceRevealAnim(mLauncher, false /* animateOverviewScrim */,
-                animateDepth).getAnimators();
-        mKeyguardUnlockAnimator.setStartDelay(startDelay);
-        mKeyguardUnlockAnimator.addListener(new AnimatorListenerAdapter() {
-            @Override
-            public void onAnimationStart(Animator animation) {
-                setWorkspaceUnlockRevealAmount(0f);
-            }
+        mLauncher.getAnimationCoordinator().setAnimation(this, pendingAnimation -> {
+            AnimatorSet revealAnimator =
+                    new WorkspaceRevealAnim(mLauncher, false /* animateOverviewScrim */,
+                            animateDepth).getAnimators();
+            revealAnimator.addListener(new AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationStart(Animator animation) {
+                    setWorkspaceUnlockRevealAmount(0f);
+                }
 
-            @Override
-            public void onAnimationEnd(Animator animation) {
-                mKeyguardUnlockAnimator = null;
-                setWorkspaceUnlockRevealAmount(1f);
-            }
-        });
-        mKeyguardUnlockAnimator.start();
+                @Override
+                public void onAnimationCancel(Animator animation) {
+                    finishWorkspaceUnlockReveal();
+                }
+
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    finishWorkspaceUnlockReveal();
+                }
+            });
+            pendingAnimation.add(revealAnimator);
+        }, WorkspaceRevealAnim.DURATION_MS);
+        mKeyguardUnlockAnimationController =
+                mLauncher.getAnimationCoordinator().getPlaybackController(this);
+        if (mKeyguardUnlockAnimationController != null) {
+            mKeyguardUnlockAnimationController.setEndAction(this::finishWorkspaceUnlockReveal);
+            mKeyguardUnlockAnimationController.start();
+        } else {
+            finishWorkspaceUnlockReveal();
+        }
     }
 
     private void cancelWorkspaceUnlockReveal() {
@@ -2032,14 +2081,57 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
     }
 
     private void cancelWorkspaceUnlockReveal(boolean resetViews) {
-        if (mKeyguardUnlockAnimator != null) {
-            AnimatorSet keyguardUnlockAnimator = mKeyguardUnlockAnimator;
-            mKeyguardUnlockAnimator = null;
-            keyguardUnlockAnimator.cancel();
+        mHandler.removeCallbacks(mWorkspaceUnlockRevealStateVerifier);
+        if (mKeyguardUnlockAnimationController != null) {
+            AnimatorPlaybackController keyguardUnlockAnimationController =
+                    mKeyguardUnlockAnimationController;
+            mKeyguardUnlockAnimationController = null;
+            keyguardUnlockAnimationController.getAnimationPlayer().cancel();
         }
+        mWorkspaceUnlockRevealPrepared = false;
+        mWorkspaceUnlockRevealVerifyAttempts = 0;
         if (resetViews) {
             setWorkspaceUnlockRevealAmount(1f);
+            resetWorkspaceUnlockScrim();
         }
+    }
+
+    private void finishWorkspaceUnlockReveal() {
+        mHandler.removeCallbacks(mWorkspaceUnlockRevealStateVerifier);
+        mKeyguardUnlockAnimationController = null;
+        mHasPlayedWorkspaceUnlockReveal = true;
+        mWorkspaceUnlockRevealPrepared = false;
+        mWorkspaceUnlockRevealVerifyAttempts = 0;
+        setWorkspaceUnlockRevealAmount(1f);
+        resetWorkspaceUnlockScrim();
+    }
+
+    private void scheduleWorkspaceUnlockRevealStateVerifier() {
+        mHandler.removeCallbacks(mWorkspaceUnlockRevealStateVerifier);
+        if (mWorkspaceUnlockRevealPrepared && mKeyguardUnlockAnimationController == null) {
+            mHandler.postDelayed(mWorkspaceUnlockRevealStateVerifier,
+                    WORKSPACE_UNLOCK_REVEAL_VERIFY_INTERVAL_MS);
+        }
+    }
+
+    private void verifyWorkspaceUnlockRevealState() {
+        if (!mWorkspaceUnlockRevealPrepared || mKeyguardUnlockAnimationController != null) {
+            return;
+        }
+        if (mLauncher.hasWindowFocus()
+                || !SystemUiFlagUtils.isLocked(mSystemUiProxy.getLastSystemUiStateFlags())) {
+            finishWorkspaceUnlockReveal();
+        } else if (++mWorkspaceUnlockRevealVerifyAttempts
+                < WORKSPACE_UNLOCK_REVEAL_VERIFY_ATTEMPTS) {
+            scheduleWorkspaceUnlockRevealStateVerifier();
+        } else {
+            finishWorkspaceUnlockReveal();
+        }
+    }
+
+    private void resetWorkspaceUnlockScrim() {
+        mLauncher.getRootView().getSysUiScrim().getSysUIMultiplier().cancelAnimation();
+        mLauncher.getRootView().getSysUiScrim().getSysUIMultiplier().updateValue(1f);
     }
 
     private void setWorkspaceUnlockRevealAmount(float amount) {

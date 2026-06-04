@@ -34,6 +34,7 @@ import org.mockito.Mock
 import org.mockito.junit.MockitoJUnit
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argThat
+import org.mockito.kotlin.inOrder
 import org.mockito.kotlin.isNull
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.verifyNoMoreInteractions
@@ -91,6 +92,20 @@ class ScreenOnTrackerTest {
 
         verify(listener).onScreenOnChanged(false)
         assertThat(underTest.isScreenOn).isFalse()
+    }
+
+    @Test
+    fun receive_screen_off_then_on_notifies_each_event_value() {
+        underTest.addListener(listener)
+
+        underTest.onReceive(Intent(ACTION_SCREEN_OFF))
+        underTest.onReceive(Intent(ACTION_SCREEN_ON))
+
+        inOrder(listener) {
+            verify(listener).onScreenOnChanged(false)
+            verify(listener).onScreenOnChanged(true)
+        }
+        assertThat(underTest.isScreenOn).isTrue()
     }
 
     @Test

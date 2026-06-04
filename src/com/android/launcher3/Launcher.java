@@ -1548,7 +1548,17 @@ public class Launcher extends StatefulActivity<LauncherState>
         }
     }
 
-    private final ScreenOnListener mScreenOnListener = this::onScreenOnChanged;
+    private final ScreenOnListener mScreenOnListener = new ScreenOnListener() {
+        @Override
+        public void onScreenOnChanged(boolean isOn) {
+            Launcher.this.onScreenOnChanged(isOn);
+        }
+
+        @Override
+        public void onUserPresent() {
+            Launcher.this.onUserPresent();
+        }
+    };
 
     @Override
     public void onAttachedToWindow() {
@@ -2146,6 +2156,8 @@ public class Launcher extends StatefulActivity<LauncherState>
             mStateManager.goToState(NORMAL);
         }
     }
+
+    protected void onUserPresent() { }
 
     @Override
     public RunnableList startActivitySafely(View v, Intent intent, ItemInfo item) {
