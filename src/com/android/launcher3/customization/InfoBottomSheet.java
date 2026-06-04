@@ -19,9 +19,7 @@ import android.view.ViewGroup;
 import android.widget.TextView;
 
 import com.android.launcher3.model.data.ItemInfo;
-import com.android.launcher3.QuickstepTransitionManager;
 import com.android.launcher3.R;
-import com.android.launcher3.util.ActivityOptionsWrapper;
 import com.android.launcher3.util.ComponentKey;
 import com.android.launcher3.widget.WidgetsBottomSheet;
 import com.android.launcher3.uioverrides.QuickstepLauncher;
@@ -99,7 +97,6 @@ public class InfoBottomSheet extends WidgetsBottomSheet {
 
         private ComponentName mComponent;
         private ComponentKey mKey;
-        private QuickstepTransitionManager mAppTransitionManager;
         private QuickstepLauncher mLauncher;
 
         @Override
@@ -107,23 +104,6 @@ public class InfoBottomSheet extends WidgetsBottomSheet {
             super.onCreate(savedInstanceState);
             mContext = getActivity();
             mLauncher = (QuickstepLauncher) QuickstepLauncher.getLauncher(mContext);
-            mAppTransitionManager = new QuickstepTransitionManager(mLauncher);
-            mAppTransitionManager.registerRemoteAnimations();
-            mAppTransitionManager.registerRemoteTransitions();
-        }
-
-        private QuickstepTransitionManager getAppTransitionManager() {
-            return mAppTransitionManager;
-        }
-
-        public ActivityOptionsWrapper getActivityLaunchOptions(View v) {
-            return mAppTransitionManager.getActivityLaunchOptions(v, mItemInfo);
-        }
-
-        @Override
-        public void onDestroy() {
-            mAppTransitionManager.onActivityDestroyed();
-            super.onDestroy();
         }
 
         @Override
@@ -180,7 +160,7 @@ public class InfoBottomSheet extends WidgetsBottomSheet {
         }
 
         private boolean tryStartActivity(Intent intent) {
-            Bundle opts = getAppTransitionManager()
+            Bundle opts = mLauncher
                     .getActivityLaunchOptions(getView(), mItemInfo)
                     .toBundle();
             try {

@@ -252,7 +252,6 @@ public abstract class SystemShortcut<T extends ActivityContext> extends ItemInfo
         public void onClick(View view) {
             dismissTaskMenuView();
             Rect sourceBounds = Utilities.getViewBounds(view);
-            ActivityOptionsWrapper options = mTarget.getActivityLaunchOptions(view, mItemInfo);
 
             boolean fromRecents = (mItemInfo.itemType == ITEM_TYPE_TASK);
             if (!fromRecents) {
@@ -267,6 +266,7 @@ public abstract class SystemShortcut<T extends ActivityContext> extends ItemInfo
             }
 
             if (fromRecents) {
+                ActivityOptionsWrapper options = mTarget.getActivityLaunchOptions(view, mItemInfo);
                 PackageManagerHelper.startDetailsActivityForInfo(view.getContext(), mItemInfo,
                         sourceBounds, options.toBundle());
             } else {
@@ -278,6 +278,8 @@ public abstract class SystemShortcut<T extends ActivityContext> extends ItemInfo
                     cbs.configureBottomSheet(sourceBounds, view.getContext());
                     cbs.populateAndShow(mItemInfo);
                 } catch (InflateException e) {
+                    ActivityOptionsWrapper options =
+                            mTarget.getActivityLaunchOptions(view, mItemInfo);
                     PackageManagerHelper.startDetailsActivityForInfo(view.getContext(), mItemInfo,
                             sourceBounds, options.toBundle());
                 }
