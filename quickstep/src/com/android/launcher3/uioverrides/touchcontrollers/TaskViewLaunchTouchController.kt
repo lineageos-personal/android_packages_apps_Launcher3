@@ -54,21 +54,18 @@ CONTAINER : RecentsViewContainer {
             recentsView.pagedOrientationHandler.upDownSwipeDirection,
         )
     private val isRtl = isRtl(container.resources)
-    private val downDirection = recentsView.pagedOrientationHandler.getDownDirection(isRtl)
-
     private var taskBeingDragged: TaskView? = null
     private var maxLockDisplacement: Float = 0f
+    private var dismissLength: Int = 0
     private var verticalFactor: Int = 0
+    private var dismissVerticalFactor: Int = 0
+    private var dragMode = DragMode.REST
     private var canInterceptTouch = false
     private var wasLockedBeforeDrag = false
     private var hasLockThresholdHapticRun = false
 
     private fun canTaskLockTaskView(taskView: TaskView?) =
-        taskView != null &&
-            taskView === recentsView.currentPageTaskView &&
-            DisplayController.getNavigationMode(container).hasGestures &&
-            (!recentsView.showAsGrid() || taskView.isLargeTile) &&
-            recentsView.isTaskInExpectedScrollPosition(taskView)
+        taskView != null && DisplayController.getNavigationMode(container).hasGestures
 
     private fun canInterceptTouch(ev: MotionEvent): Boolean =
         when {
@@ -126,11 +123,7 @@ CONTAINER : RecentsViewContainer {
             return false
         }
         onControllerTouchEvent(ev)
-        val downDirectionIsNegative = downDirection == SingleAxisSwipeDetector.DIRECTION_NEGATIVE
-        val wasInitialTouchDown =
-            (downDirectionIsNegative && !detector.wasInitialTouchPositive()) ||
-                (!downDirectionIsNegative && detector.wasInitialTouchPositive())
-        return detector.isDraggingState && wasInitialTouchDown
+        return detector.isDraggingState
     }
 
     override fun onControllerTouchEvent(ev: MotionEvent) = detector.onTouchEvent(ev)
@@ -140,19 +133,18 @@ CONTAINER : RecentsViewContainer {
             return false
         }
         taskBeingDragged =
-            recentsView.taskViews
-                .firstOrNull {
-                    recentsView.isTaskViewVisible(it) && container.dragLayer.isEventOverView(it, ev)
-                }
-                ?.also {
-                    verticalFactor =
-                        recentsView.pagedOrientationHandler.getTaskDragDisplacementFactor(isRtl)
-                }
+            recentsView.findTopMostTaskUnderEvent(ev)?.also {
+                verticalFactor =
+                    recentsView.pagedOrientationHandler.getTaskDragDisplacementFactor(isRtl)
+            }
         if (!canTaskLockTaskView(taskBeingDragged)) {
             debugLog(TAG, "Not intercepting touch, task cannot be locked.")
             return false
         }
-        detector.setDetectableScrollConditions(downDirection, /* ignoreSlop= */ false)
+        detector.setDetectableScrollConditions(
+            SingleAxisSwipeDetector.DIRECTION_BOTH,
+            /* ignoreSlop= */ false,
+        )
         return true
     }
 
@@ -163,27 +155,55 @@ CONTAINER : RecentsViewContainer {
         val secondaryLayerDimension: Int =
             recentsView.pagedOrientationHandler.getSecondaryDimension(container.getDragLayer())
         taskBeingDragged.getThumbnailBounds(tempRect, /* relativeToDragLayer= */ true)
-        maxLockDisplacement = ceil(
+        val taskDismissLength =
             recentsView.pagedOrientationHandler.getTaskDismissLength(
                 secondaryLayerDimension, tempRect
-            ) * LOCK_DISPLACEMENT_FRACTION
-        ).toFloat() * verticalFactor
+            )
+        maxLockDisplacement = ceil(taskDismissLength * LOCK_DISPLACEMENT_FRACTION)
+            .toFloat() * verticalFactor
+        dismissLength = ceil(taskDismissLength / RECENTS_SCALE_ON_DISMISS_SUCCESS).toInt()
+        dismissVerticalFactor = recentsView.pagedOrientationHandler.getTaskDismissVerticalDirection()
 
-        taskBeingDragged.translationZ = 0.1f
+        if (recentsView.shouldKeepTaskBehindLiveTileOnTouch(taskBeingDragged)) {
+            recentsView.enforceTaskTouchZOrder(taskBeingDragged)
+        } else {
+            taskBeingDragged.translationZ = 0.1f
+        }
 
         wasLockedBeforeDrag = taskBeingDragged.isLocked
         hasLockThresholdHapticRun = false
+        dragMode = DragMode.REST
 
         showLockPill(wasLockedBeforeDrag)
     }
 
     override fun onDrag(displacement: Float): Boolean {
         val taskBeingDragged = taskBeingDragged ?: return false
-        val boundedDisplacement = boundToRange(
-            abs(displacement),
-            0f,
-            abs(maxLockDisplacement)
-        ) * verticalFactor
+        val isGoingUp = recentsView.pagedOrientationHandler.isGoingUp(displacement, isRtl)
+        val displacementAbs = abs(displacement)
+        val boundedDisplacement =
+            when {
+                displacementAbs < CANCEL_DISPLACEMENT_EPSILON -> {
+                    dragMode = DragMode.REST
+                    hasLockThresholdHapticRun = false
+                    hideLockPill()
+                    taskBeingDragged.isBeingDraggedForDismissal = false
+                    0f
+                }
+                isGoingUp -> {
+                    dragMode = DragMode.DISMISS
+                    hasLockThresholdHapticRun = false
+                    hideLockPill()
+                    taskBeingDragged.isBeingDraggedForDismissal = true
+                    boundToRange(displacementAbs, 0f, dismissLength.toFloat()) * dismissVerticalFactor
+                }
+                else -> {
+                    dragMode = DragMode.LOCK
+                    showLockPill(wasLockedBeforeDrag)
+                    taskBeingDragged.isBeingDraggedForDismissal = false
+                    boundToRange(displacementAbs, 0f, abs(maxLockDisplacement)) * verticalFactor
+                }
+            }
         taskBeingDragged.secondaryDismissTranslationProperty.setValue(
             taskBeingDragged, boundedDisplacement
         )
@@ -194,7 +214,9 @@ CONTAINER : RecentsViewContainer {
             }
             recentsView.redrawLiveTile()
         }
-        playLockThresholdHaptic(displacement)
+        if (dragMode == DragMode.LOCK) {
+            playLockThresholdHaptic(displacement)
+        }
         return true
     }
 
@@ -218,41 +240,71 @@ CONTAINER : RecentsViewContainer {
         val taskBeingDragged = taskBeingDragged ?: return
         val currentDisplacement =
             taskBeingDragged.secondaryDismissTranslationProperty.get(taskBeingDragged)
-        val isBeyondLockThreshold =
-            abs(currentDisplacement) > abs(LOCK_THRESHOLD_FRACTION * maxLockDisplacement)
+        val isDismissDrag = dragMode == DragMode.DISMISS
 
-        if (isBeyondLockThreshold) {
-            val packageName = taskBeingDragged.firstTask?.key?.packageName
-            if (packageName != null) {
-                LockedTaskManager.getInstance(container).setPackageLocked(
-                    packageName, !wasLockedBeforeDrag
-                )
-                taskBeingDragged.updateLockState(packageName)
+        if (!isDismissDrag) {
+            val isBeyondLockThreshold =
+                dragMode == DragMode.LOCK &&
+                    abs(currentDisplacement) > abs(LOCK_THRESHOLD_FRACTION * maxLockDisplacement)
+
+            if (isBeyondLockThreshold) {
+                val packageName = taskBeingDragged.firstTask?.key?.packageName
+                if (packageName != null) {
+                    LockedTaskManager.getInstance(container).setPackageLocked(
+                        packageName, !wasLockedBeforeDrag
+                    )
+                    taskBeingDragged.updateLockState(packageName)
+                }
             }
         }
 
         hideLockPill()
 
-        val dismissLength = abs(maxLockDisplacement).roundToInt()
+        val isBeyondDismissThreshold =
+            abs(currentDisplacement) > abs(DISMISS_THRESHOLD_FRACTION * dismissLength)
+        val velocityIsGoingUp = recentsView.pagedOrientationHandler.isGoingUp(velocity, isRtl)
+        val isFlingingTowardsDismiss = detector.isFling(velocity) && velocityIsGoingUp
+        val isFlingingTowardsRestState = detector.isFling(velocity) && !velocityIsGoingUp
+        val shouldDismiss =
+            isDismissDrag &&
+                recentsView.canRemoveTaskView(taskBeingDragged) &&
+                (isFlingingTowardsDismiss ||
+                    (isBeyondDismissThreshold && !isFlingingTowardsRestState))
+        val settlingDismissLength =
+            if (isDismissDrag) dismissLength else abs(maxLockDisplacement).roundToInt()
+        val finalPosition =
+            if (shouldDismiss) (dismissLength * dismissVerticalFactor).toFloat() else 0f
+        val dismissThreshold =
+            if (isDismissDrag) {
+                (DISMISS_THRESHOLD_FRACTION * dismissLength * dismissVerticalFactor).roundToInt()
+            } else {
+                (LOCK_THRESHOLD_FRACTION * settlingDismissLength).roundToInt()
+            }
         recentsView.runTaskDismissSettlingSpringAnimation(
             taskBeingDragged,
-            false,
+            shouldDismiss,
             RecentsDismissUtils.DismissedTaskData(
                 velocity,
-                dismissLength,
-                0f,
-                (LOCK_THRESHOLD_FRACTION * dismissLength).roundToInt(),
+                settlingDismissLength,
+                finalPosition,
+                dismissThreshold,
             ),
-            false,
+            shouldDismiss,
             false,
         )?.addEndListener {
+            taskBeingDragged.secondaryDismissTranslationProperty.setValue(taskBeingDragged, 0f)
+            taskBeingDragged.isBeingDraggedForDismissal = false
             if (taskBeingDragged.isRunningTask) {
                 recentsView.runActionOnRemoteHandles { remoteTargetHandle ->
                     remoteTargetHandle.taskViewSimulator.taskSecondaryTranslation.value = 0f
                 }
                 recentsView.redrawLiveTile()
             }
-            taskBeingDragged.translationZ = 0f
+            if (recentsView.shouldKeepTaskBehindLiveTileOnTouch(taskBeingDragged)) {
+                recentsView.enforceTaskTouchZOrder(taskBeingDragged)
+            } else {
+                taskBeingDragged.translationZ = 0f
+            }
             taskBeingDragged.isBeingDismissed = false
         }
     }
@@ -272,16 +324,28 @@ CONTAINER : RecentsViewContainer {
         detector.setDetectableScrollConditions(0, false)
         taskBeingDragged?.let {
             it.secondaryDismissTranslationProperty.setValue(it, 0f)
+            it.isBeingDraggedForDismissal = false
             if (it.isRunningTask) {
                 recentsView.runActionOnRemoteHandles { remoteTargetHandle ->
                     remoteTargetHandle.taskViewSimulator.taskSecondaryTranslation.value = 0f
                 }
                 recentsView.redrawLiveTile()
             }
-            it.translationZ = 0f
+            if (recentsView.shouldKeepTaskBehindLiveTileOnTouch(it)) {
+                recentsView.enforceTaskTouchZOrder(it)
+            } else {
+                it.translationZ = 0f
+            }
         }
         hideLockPill()
+        dragMode = DragMode.REST
         taskBeingDragged = null
+    }
+
+    private enum class DragMode {
+        REST,
+        LOCK,
+        DISMISS,
     }
 
     companion object {
@@ -289,5 +353,8 @@ CONTAINER : RecentsViewContainer {
         private const val LOCK_DISPLACEMENT_FRACTION = 0.4f
         private const val LOCK_THRESHOLD_FRACTION = 0.5f
         private const val LOCK_THRESHOLD_HAPTIC_RANGE = 10f
+        private const val DISMISS_THRESHOLD_FRACTION = 0.5f
+        private const val CANCEL_DISPLACEMENT_EPSILON = 1f
+        private const val RECENTS_SCALE_ON_DISMISS_SUCCESS = 0.975f
     }
 }

@@ -21,6 +21,7 @@ import android.view.View
 import androidx.core.graphics.toRectF
 import androidx.core.view.children
 import androidx.core.view.contains
+import androidx.dynamicanimation.animation.DynamicAnimation
 import androidx.dynamicanimation.animation.FloatPropertyCompat
 import androidx.dynamicanimation.animation.FloatValueHolder
 import androidx.dynamicanimation.animation.SpringAnimation
@@ -333,11 +334,11 @@ constructor(
             .addEndListener {
                 with(recentsView) {
                     if (hasLockedTaskViews) {
-                        val previousScales = captureTaskScales(
+                        val previousVisualStates = captureTaskVisualStates(
                             taskViews.filter { !shouldDismissTaskOnClearAll(it) }
                         )
                         finishClearAllWithLockedTaskViews()
-                        animateTaskScales(previousScales)
+                        animateTaskVisuals(previousVisualStates)
                         InteractionJankMonitorWrapper.end(Cuj.CUJ_LAUNCHER_OVERVIEW_CLEAR_ALL)
                     } else {
                         // Remove desktops first, since desks can be empty (so they have no recent
@@ -361,52 +362,116 @@ constructor(
             .start()
     }
 
-    private fun captureTaskScales(taskViews: List<TaskView>): Map<Int, Pair<Float, Float>> {
+    private fun captureTaskVisualStates(taskViews: List<TaskView>): Map<Int, TaskVisualState> {
         if (com.android.launcher3.LauncherPrefs.RECENTS_STYLE.get(recentsView.context) == "default") {
             return emptyMap()
         }
-        return taskViews.associate { it.taskViewId to (it.scaleX to it.scaleY) }
+        return taskViews.associate { taskView ->
+            taskView.taskViewId to
+                TaskVisualState(
+                    scaleX = taskView.scaleX,
+                    scaleY = taskView.scaleY,
+                    primaryCenter = getTaskPrimaryCenter(taskView),
+                )
+        }
     }
 
-    private fun animateTaskScales(previousScales: Map<Int, Pair<Float, Float>>) {
-        if (previousScales.isEmpty()) {
+    private fun animateTaskVisuals(previousVisualStates: Map<Int, TaskVisualState>) {
+        if (previousVisualStates.isEmpty()) {
             return
         }
-        val scaleAnimators = java.util.ArrayList<android.animation.Animator>()
+
+        val setupListener =
+            object : android.view.ViewTreeObserver.OnPreDrawListener {
+                override fun onPreDraw(): Boolean {
+                    recentsView.viewTreeObserver.removeOnPreDrawListener(this)
+                    startTaskVisualSprings(previousVisualStates)
+                    return true
+                }
+            }
+        recentsView.viewTreeObserver.addOnPreDrawListener(setupListener)
+    }
+
+    private fun startTaskVisualSprings(previousVisualStates: Map<Int, TaskVisualState>) {
+        val visualSpringSet =
+            SpringSet(SpringAnimation(FloatValueHolder()).setSpring(SpringForce(1f)))
         val currentAnimatedScalesX = mutableMapOf<Int, Float>()
         val currentAnimatedScalesY = mutableMapOf<Int, Float>()
+        val currentAnimatedPrimaryTranslations = mutableMapOf<Int, Float>()
+        var hasVisualSpring = false
 
         recentsView.taskViews.forEach { taskView ->
-            val previousScale = previousScales[taskView.taskViewId] ?: return@forEach
+            val previousState = previousVisualStates[taskView.taskViewId] ?: return@forEach
             val targetScaleX = taskView.scaleX
             val targetScaleY = taskView.scaleY
-            val startScaleX = previousScale.first
-            val startScaleY = previousScale.second
+            val startScaleX = previousState.scaleX
+            val startScaleY = previousState.scaleY
+            val startPrimaryTranslation = previousState.primaryCenter - getTaskPrimaryCenter(taskView)
 
+            if (startPrimaryTranslation != 0f) {
+                currentAnimatedPrimaryTranslations[taskView.taskViewId] = startPrimaryTranslation
+                taskView.primaryDismissTranslationProperty.setValue(taskView, startPrimaryTranslation)
+                val primarySpring =
+                    SpringAnimation(
+                            taskView,
+                            FloatPropertyCompat.createFloatPropertyCompat(
+                                taskView.primaryDismissTranslationProperty
+                            ),
+                        )
+                        .setSpring(createExpressiveGridReflowSpringForce(0f))
+                        .setStartValue(startPrimaryTranslation)
+                primarySpring.addUpdateListener { _, value, _ ->
+                    currentAnimatedPrimaryTranslations[taskView.taskViewId] = value
+                    taskView.primaryDismissTranslationProperty.setValue(taskView, value)
+                }
+                primarySpring.addEndListener { _, _, _, _ ->
+                    currentAnimatedPrimaryTranslations[taskView.taskViewId] = 0f
+                    taskView.primaryDismissTranslationProperty.setValue(taskView, 0f)
+                }
+                visualSpringSet.trackSpring(primarySpring, 0f)
+                visualSpringSet.addStartListener { primarySpring.start() }
+                hasVisualSpring = true
+            }
             if (startScaleX != targetScaleX) {
                 currentAnimatedScalesX[taskView.taskViewId] = startScaleX
                 taskView.scaleX = startScaleX
-                val animator = android.animation.ValueAnimator.ofFloat(startScaleX, targetScaleX)
-                animator.addUpdateListener { anim ->
-                    val value = anim.animatedValue as Float
+                val scaleXSpring =
+                    SpringAnimation(taskView, DynamicAnimation.SCALE_X)
+                        .setSpring(createExpressiveGridReflowSpringForce(targetScaleX))
+                        .setStartValue(startScaleX)
+                scaleXSpring.addUpdateListener { _, value, _ ->
                     currentAnimatedScalesX[taskView.taskViewId] = value
                     taskView.scaleX = value
                 }
-                scaleAnimators.add(animator)
+                scaleXSpring.addEndListener { _, _, _, _ ->
+                    currentAnimatedScalesX[taskView.taskViewId] = targetScaleX
+                    taskView.scaleX = targetScaleX
+                }
+                visualSpringSet.trackSpring(scaleXSpring, targetScaleX)
+                visualSpringSet.addStartListener { scaleXSpring.start() }
+                hasVisualSpring = true
             }
             if (startScaleY != targetScaleY) {
                 currentAnimatedScalesY[taskView.taskViewId] = startScaleY
                 taskView.scaleY = startScaleY
-                val animator = android.animation.ValueAnimator.ofFloat(startScaleY, targetScaleY)
-                animator.addUpdateListener { anim ->
-                    val value = anim.animatedValue as Float
+                val scaleYSpring =
+                    SpringAnimation(taskView, DynamicAnimation.SCALE_Y)
+                        .setSpring(createExpressiveGridReflowSpringForce(targetScaleY))
+                        .setStartValue(startScaleY)
+                scaleYSpring.addUpdateListener { _, value, _ ->
                     currentAnimatedScalesY[taskView.taskViewId] = value
                     taskView.scaleY = value
                 }
-                scaleAnimators.add(animator)
+                scaleYSpring.addEndListener { _, _, _, _ ->
+                    currentAnimatedScalesY[taskView.taskViewId] = targetScaleY
+                    taskView.scaleY = targetScaleY
+                }
+                visualSpringSet.trackSpring(scaleYSpring, targetScaleY)
+                visualSpringSet.addStartListener { scaleYSpring.start() }
+                hasVisualSpring = true
             }
         }
-        if (scaleAnimators.isEmpty()) {
+        if (!hasVisualSpring) {
             return
         }
 
@@ -415,27 +480,32 @@ constructor(
                 recentsView.taskViews.forEach { taskView ->
                     currentAnimatedScalesX[taskView.taskViewId]?.let { taskView.scaleX = it }
                     currentAnimatedScalesY[taskView.taskViewId]?.let { taskView.scaleY = it }
+                    currentAnimatedPrimaryTranslations[taskView.taskViewId]?.let {
+                        taskView.primaryDismissTranslationProperty.setValue(taskView, it)
+                    }
                 }
                 return true
             }
         }
         recentsView.viewTreeObserver.addOnPreDrawListener(preDrawListener)
-
-        android.animation.AnimatorSet().apply {
-            playTogether(scaleAnimators)
-            duration = 300
-            interpolator = android.view.animation.PathInterpolator(0.33f, 1f, 0.68f, 1f)
-            addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: android.animation.Animator) {
-                    recentsView.viewTreeObserver.removeOnPreDrawListener(preDrawListener)
-                    recentsView.taskViews.forEach { taskView ->
-                        currentAnimatedScalesX[taskView.taskViewId]?.let { taskView.scaleX = it }
-                        currentAnimatedScalesY[taskView.taskViewId]?.let { taskView.scaleY = it }
-                    }
+        visualSpringSet.addEndListener {
+            recentsView.viewTreeObserver.removeOnPreDrawListener(preDrawListener)
+            recentsView.taskViews.forEach { taskView ->
+                currentAnimatedScalesX[taskView.taskViewId]?.let { taskView.scaleX = it }
+                currentAnimatedScalesY[taskView.taskViewId]?.let { taskView.scaleY = it }
+                currentAnimatedPrimaryTranslations[taskView.taskViewId]?.let {
+                    taskView.primaryDismissTranslationProperty.setValue(taskView, it)
                 }
-            })
-            start()
+            }
         }
+        visualSpringSet.start()
+    }
+
+    private fun getTaskPrimaryCenter(taskView: TaskView): Float {
+        val centerX = taskView.left + taskView.width / 2f
+        val centerY = taskView.top + taskView.height / 2f
+        return recentsView.pagedOrientationHandler.getPrimaryValue(centerX, centerY) +
+            taskView.primaryDismissTranslationProperty.get(taskView)
     }
 
     /** Bounce neighboring tasks due to a canceled dismiss or the reflow of tasks after dismiss. */
@@ -1599,6 +1669,12 @@ constructor(
             return this
         }
     }
+
+    private data class TaskVisualState(
+        val scaleX: Float,
+        val scaleY: Float,
+        val primaryCenter: Float,
+    )
 
     data class GridEndData(
         val gridEndOffset: Float,
