@@ -84,14 +84,10 @@ public class ScreenOnTracker {
         String action = intent.getAction();
         if (ACTION_SCREEN_ON.equals(action)) {
             mIsScreenOn = true;
-            THREAD_POOL_EXECUTOR.execute(() -> {
-                dispatchScreenOnChanged();
-            });
+            THREAD_POOL_EXECUTOR.execute(() -> dispatchScreenOnChanged(true));
         } else if (ACTION_SCREEN_OFF.equals(action)) {
             mIsScreenOn = false;
-            THREAD_POOL_EXECUTOR.execute(() -> {
-                dispatchScreenOnChanged();
-            });
+            THREAD_POOL_EXECUTOR.execute(() -> dispatchScreenOnChanged(false));
         } else if (ACTION_USER_PRESENT.equals(action)) {
             THREAD_POOL_EXECUTOR.execute(() -> {
                 dispatchUserPresent();
@@ -99,10 +95,10 @@ public class ScreenOnTracker {
         }
     }
 
-    private void dispatchScreenOnChanged() {
+    private void dispatchScreenOnChanged(boolean isOn) {
         for (ScreenOnListener listener : mListeners) {
             MAIN_EXECUTOR.execute(() -> {
-                listener.onScreenOnChanged(mIsScreenOn);
+                listener.onScreenOnChanged(isOn);
             });
         }
     }
