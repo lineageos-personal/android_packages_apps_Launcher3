@@ -177,9 +177,7 @@ CONTAINER : StatefulContainer<T> {
             return false
         }
         val taskBeingDragged =
-            recentsView.taskViews.firstOrNull {
-                recentsView.isTaskViewVisible(it) && container.dragLayer.isEventOverView(it, ev)
-            }
+            recentsView.findTopMostTaskUnderEvent(ev)
                 // If event is not over a taskView, check if it would have been either over the
                 // currently dismissing task being dragged, or over where the next task will be.
                 ?: recentsView.taskViews.firstOrNull { taskView ->

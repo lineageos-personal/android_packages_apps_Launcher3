@@ -1616,6 +1616,39 @@ public abstract class RecentsView<
         }
     }
 
+    /**
+     * Returns the visually topmost task under the event.
+     *
+     * Overlapping recents styles can place multiple transformed task bounds under the same touch.
+     * Prefer the task drawn above the others instead of whichever task appears first in the task
+     * iterable.
+     */
+    @Nullable
+    public TaskView findTopMostTaskUnderEvent(MotionEvent ev) {
+        TaskView bestTask = null;
+        float bestZ = Float.NEGATIVE_INFINITY;
+        int bestIndex = Integer.MIN_VALUE;
+        final float epsilon = 1e-4f;
+
+        for (TaskView taskView : getTaskViews()) {
+            if (!isTaskViewVisible(taskView)
+                    || !mContainer.getDragLayer().isEventOverView(taskView, ev)) {
+                continue;
+            }
+
+            float taskZ = taskView.getZ();
+            int taskIndex = indexOfChild(taskView);
+            if (bestTask == null
+                    || taskZ > bestZ + epsilon
+                    || (Math.abs(taskZ - bestZ) <= epsilon && taskIndex > bestIndex)) {
+                bestTask = taskView;
+                bestZ = taskZ;
+                bestIndex = taskIndex;
+            }
+        }
+        return bestTask;
+    }
+
     public boolean isTaskViewFullyVisible(TaskView tv) {
         if (showAsGrid()) {
             int screenStart = getPagedOrientationHandler().getPrimaryScroll(this);
