@@ -671,7 +671,10 @@ constructor(
             iconArrowView?.scaleY = 1f
         } else {
             iconArrowView?.setImageResource(R.drawable.ic_chevron_down)
-            iconArrowView?.imageTintList = null
+            iconArrowView?.imageTintList =
+                ColorStateList.valueOf(
+                    resources.getColor(R.color.materialColorOnSurface, context.theme)
+                )
             iconArrowView?.scaleY = 1f
         }
     }
