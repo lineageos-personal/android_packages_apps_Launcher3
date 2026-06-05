@@ -62,7 +62,8 @@ CONTAINER : RecentsViewContainer {
     private var dragMode = DragMode.REST
     private var canInterceptTouch = false
     private var wasLockedBeforeDrag = false
-    private var hasLockThresholdHapticRun = false
+    private var hasEnteredLockIndicatorZone = false
+    private var visibleIndicator = GestureIndicator.NONE
 
     private fun canTaskLockTaskView(taskView: TaskView?) =
         taskView != null && DisplayController.getNavigationMode(container).hasGestures
@@ -171,35 +172,56 @@ CONTAINER : RecentsViewContainer {
         }
 
         wasLockedBeforeDrag = taskBeingDragged.isLocked
-        hasLockThresholdHapticRun = false
+        hasEnteredLockIndicatorZone = false
+        visibleIndicator = GestureIndicator.NONE
         dragMode = DragMode.REST
 
-        showLockPill(wasLockedBeforeDrag)
+        hideLockPill()
     }
 
     override fun onDrag(displacement: Float): Boolean {
         val taskBeingDragged = taskBeingDragged ?: return false
         val isGoingUp = recentsView.pagedOrientationHandler.isGoingUp(displacement, isRtl)
         val displacementAbs = abs(displacement)
+        val lockIndicatorThreshold = abs(maxLockDisplacement) * LOCK_THRESHOLD_FRACTION
+        val dismissIndicatorThreshold = dismissLength * DISMISS_THRESHOLD_FRACTION
         val boundedDisplacement =
             when {
-                displacementAbs < CANCEL_DISPLACEMENT_EPSILON -> {
+                displacementAbs < dismissLength * CANCEL_DISPLACEMENT_FRACTION -> {
                     dragMode = DragMode.REST
-                    hasLockThresholdHapticRun = false
-                    hideLockPill()
+                    if (hasEnteredLockIndicatorZone) {
+                        showGestureIndicator(GestureIndicator.CANCEL)
+                    } else {
+                        showGestureIndicator(GestureIndicator.NONE)
+                    }
                     taskBeingDragged.isBeingDraggedForDismissal = false
-                    0f
+                    if (isGoingUp) {
+                        boundToRange(displacementAbs, 0f, dismissLength.toFloat()) *
+                            dismissVerticalFactor
+                    } else {
+                        boundToRange(displacementAbs, 0f, abs(maxLockDisplacement)) *
+                            verticalFactor
+                    }
                 }
                 isGoingUp -> {
                     dragMode = DragMode.DISMISS
-                    hasLockThresholdHapticRun = false
-                    hideLockPill()
+                    if (displacementAbs >= dismissIndicatorThreshold) {
+                        hasEnteredLockIndicatorZone = false
+                        showGestureIndicator(GestureIndicator.DISMISS)
+                    } else {
+                        showGestureIndicator(GestureIndicator.NONE)
+                    }
                     taskBeingDragged.isBeingDraggedForDismissal = true
                     boundToRange(displacementAbs, 0f, dismissLength.toFloat()) * dismissVerticalFactor
                 }
                 else -> {
                     dragMode = DragMode.LOCK
-                    showLockPill(wasLockedBeforeDrag)
+                    if (displacementAbs >= lockIndicatorThreshold) {
+                        hasEnteredLockIndicatorZone = true
+                        showGestureIndicator(GestureIndicator.LOCK)
+                    } else {
+                        showGestureIndicator(GestureIndicator.NONE)
+                    }
                     taskBeingDragged.isBeingDraggedForDismissal = false
                     boundToRange(displacementAbs, 0f, abs(maxLockDisplacement)) * verticalFactor
                 }
@@ -214,25 +236,23 @@ CONTAINER : RecentsViewContainer {
             }
             recentsView.redrawLiveTile()
         }
-        if (dragMode == DragMode.LOCK) {
-            playLockThresholdHaptic(displacement)
-        }
         return true
     }
 
-    private fun playLockThresholdHaptic(displacement: Float) {
-        val lockThreshold = (LOCK_THRESHOLD_FRACTION * maxLockDisplacement)
-        val lockThresholdAbs = abs(lockThreshold)
-        val displacementAbs = abs(displacement)
-        val inHapticRange =
-            displacementAbs >= (lockThresholdAbs - LOCK_THRESHOLD_HAPTIC_RANGE) &&
-                displacementAbs <= (lockThresholdAbs + LOCK_THRESHOLD_HAPTIC_RANGE)
-        if (!inHapticRange) {
-            hasLockThresholdHapticRun = false
-        } else if (!hasLockThresholdHapticRun) {
+    private fun showGestureIndicator(indicator: GestureIndicator) {
+        if (visibleIndicator == indicator) {
+            return
+        }
+        visibleIndicator = indicator
+        when (indicator) {
+            GestureIndicator.NONE -> hideLockPill()
+            GestureIndicator.LOCK -> showLockPill(wasLockedBeforeDrag)
+            GestureIndicator.CANCEL -> showCancelPill()
+            GestureIndicator.DISMISS -> showDismissPill()
+        }
+        if (indicator != GestureIndicator.NONE) {
             MSDLPlayerWrapper.INSTANCE.get(recentsView.context)
                 .playToken(MSDLToken.SWIPE_THRESHOLD_INDICATOR)
-            hasLockThresholdHapticRun = true
         }
     }
 
@@ -314,6 +334,16 @@ CONTAINER : RecentsViewContainer {
         actionsView.showLockPill(isCurrentlyLocked)
     }
 
+    private fun showCancelPill() {
+        val actionsView = container.actionsView ?: return
+        actionsView.showCancelPill()
+    }
+
+    private fun showDismissPill() {
+        val actionsView = container.actionsView ?: return
+        actionsView.showDismissPill()
+    }
+
     private fun hideLockPill() {
         val actionsView = container.actionsView ?: return
         actionsView.hideLockPill()
@@ -339,6 +369,8 @@ CONTAINER : RecentsViewContainer {
         }
         hideLockPill()
         dragMode = DragMode.REST
+        hasEnteredLockIndicatorZone = false
+        visibleIndicator = GestureIndicator.NONE
         taskBeingDragged = null
     }
 
@@ -348,13 +380,19 @@ CONTAINER : RecentsViewContainer {
         DISMISS,
     }
 
+    private enum class GestureIndicator {
+        NONE,
+        LOCK,
+        CANCEL,
+        DISMISS,
+    }
+
     companion object {
         private const val TAG = "TaskViewLaunchTouchController"
         private const val LOCK_DISPLACEMENT_FRACTION = 0.4f
         private const val LOCK_THRESHOLD_FRACTION = 0.5f
-        private const val LOCK_THRESHOLD_HAPTIC_RANGE = 10f
         private const val DISMISS_THRESHOLD_FRACTION = 0.5f
-        private const val CANCEL_DISPLACEMENT_EPSILON = 1f
+        private const val CANCEL_DISPLACEMENT_FRACTION = 0.1f
         private const val RECENTS_SCALE_ON_DISMISS_SUCCESS = 0.975f
     }
 }

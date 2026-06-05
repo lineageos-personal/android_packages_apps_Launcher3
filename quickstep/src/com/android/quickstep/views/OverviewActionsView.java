@@ -31,8 +31,9 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.widget.Button;
-import android.widget.ImageButton;
 import android.widget.FrameLayout;
+import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 import android.widget.TextView;
@@ -69,6 +70,11 @@ public class OverviewActionsView<T extends OverlayUICallbacks> extends FrameLayo
         implements OnClickListener, Insettable, SharedPreferences.OnSharedPreferenceChangeListener {
 
     public static final String TAG = "OverviewActionsView";
+    private static final int TASK_DRAG_PILL_HIDDEN = 0;
+    private static final int TASK_DRAG_PILL_LOCK = 1;
+    private static final int TASK_DRAG_PILL_CANCEL = 2;
+    private static final int TASK_DRAG_PILL_DISMISS = 3;
+
     private final Rect mInsets = new Rect();
 
     /**
@@ -197,8 +203,10 @@ public class OverviewActionsView<T extends OverlayUICallbacks> extends FrameLayo
     private boolean mIsPerformingMemoryBoost;
     private View mClearAllButton;
     private View mLockPillContainer;
+    private ImageView mLockPillIcon;
     private TextView mLockPillText;
     private boolean mLockPillShowing = false;
+    private int mTaskDragPillMode = TASK_DRAG_PILL_HIDDEN;
 
     public OverviewActionsView(Context context) {
         this(context, null);
@@ -284,25 +292,89 @@ public class OverviewActionsView<T extends OverlayUICallbacks> extends FrameLayo
             }, 1f /* initialValue */);
         }
         mLockPillContainer = findViewById(R.id.lock_pill_container);
+        mLockPillIcon = findViewById(R.id.lock_pill_icon);
         mLockPillText = findViewById(R.id.lock_pill_text);
+        setClipChildren(false);
+        setClipToPadding(false);
         updateVisibilities();
     }
 
     public void showLockPill(boolean isCurrentlyLocked) {
-        if (mLockPillContainer == null || mLockPillShowing) return;
+        showTaskDragPill(
+                isCurrentlyLocked ? R.string.unlock_app : R.string.lock_app,
+                TASK_DRAG_PILL_LOCK,
+                true);
+    }
+
+    public void showCancelPill() {
+        showTaskDragPill(
+                R.string.toast_split_select_app_cancel, TASK_DRAG_PILL_CANCEL, false);
+    }
+
+    public void showDismissPill() {
+        showTaskDragPill(
+                R.string.action_dismiss_notification, TASK_DRAG_PILL_DISMISS, false);
+    }
+
+    private void showTaskDragPill(int textRes, int mode, boolean showLockIcon) {
+        if (mLockPillContainer == null) return;
+
+        boolean modeChanged = mTaskDragPillMode != mode;
+        if (modeChanged) {
+            mTaskDragPillMode = mode;
+            mLockPillText.setText(textRes);
+            mLockPillIcon.setVisibility(showLockIcon ? VISIBLE : GONE);
+            LinearLayout.LayoutParams textLayoutParams =
+                    (LinearLayout.LayoutParams) mLockPillText.getLayoutParams();
+            textLayoutParams.setMarginStart(showLockIcon
+                    ? Math.round(8 * getResources().getDisplayMetrics().density) : 0);
+            mLockPillText.setLayoutParams(textLayoutParams);
+            positionTaskDragPill(mode);
+            mActionButtons.animate()
+                    .alpha(mode == TASK_DRAG_PILL_LOCK ? 0f : 1f)
+                    .setDuration(150)
+                    .start();
+            if (mLockPillShowing) {
+                mLockPillContainer.setAlpha(1f);
+            }
+        }
+        if (mLockPillShowing) return;
+
+        mLockPillContainer.animate().cancel();
         mLockPillShowing = true;
-        mLockPillText.setText(isCurrentlyLocked ? R.string.unlock_app : R.string.lock_app);
         mLockPillContainer.setAlpha(0f);
         mLockPillContainer.setVisibility(VISIBLE);
         mLockPillContainer.animate().alpha(1f).setDuration(150).start();
-        mActionButtons.animate().alpha(0f).setDuration(150).start();
+    }
+
+    private void positionTaskDragPill(int mode) {
+        mLockPillContainer.post(() -> {
+            if (mTaskDragPillMode != mode) return;
+            if (mode == TASK_DRAG_PILL_LOCK) {
+                mLockPillContainer.setTranslationY(0f);
+                return;
+            }
+            View root = getRootView();
+            int[] rootLocation = new int[2];
+            int[] actionsLocation = new int[2];
+            root.getLocationOnScreen(rootLocation);
+            getLocationOnScreen(actionsLocation);
+            float baseCenter = actionsLocation[1] + mLockPillContainer.getTop()
+                    + mLockPillContainer.getHeight() / 2f;
+            float targetCenter = rootLocation[1] + root.getHeight()
+                    * (mode == TASK_DRAG_PILL_DISMISS ? 0.12f : 0.5f);
+            mLockPillContainer.setTranslationY(targetCenter - baseCenter);
+        });
     }
 
     public void hideLockPill() {
         if (mLockPillContainer == null || !mLockPillShowing) return;
         mLockPillShowing = false;
-        mLockPillContainer.animate().alpha(0f).setDuration(150).withEndAction(() ->
-                mLockPillContainer.setVisibility(GONE)).start();
+        mTaskDragPillMode = TASK_DRAG_PILL_HIDDEN;
+        mLockPillContainer.animate().alpha(0f).setDuration(150).withEndAction(() -> {
+            mLockPillContainer.setVisibility(GONE);
+            mLockPillContainer.setTranslationY(0f);
+        }).start();
         mActionButtons.animate().alpha(1f).setDuration(150).start();
     }
 
