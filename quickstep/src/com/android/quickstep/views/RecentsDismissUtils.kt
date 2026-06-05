@@ -404,6 +404,12 @@ constructor(
             val startScaleX = previousState.scaleX
             val startScaleY = previousState.scaleY
             val startPrimaryTranslation = previousState.primaryCenter - getTaskPrimaryCenter(taskView)
+            val visualStiffnessMultiplier =
+                if (startPrimaryTranslation < 0f) {
+                    LOCKED_TASK_LEFT_VISUAL_STIFFNESS_MULTIPLIER
+                } else {
+                    LOCKED_TASK_RIGHT_VISUAL_STIFFNESS_MULTIPLIER
+                }
 
             if (startPrimaryTranslation != 0f) {
                 currentAnimatedPrimaryTranslations[taskView.taskViewId] = startPrimaryTranslation
@@ -415,7 +421,7 @@ constructor(
                                 taskView.primaryDismissTranslationProperty
                             ),
                         )
-                        .setSpring(createExpressiveGridReflowSpringForce(0f))
+                        .setSpring(createLockedTaskVisualSpringForce(0f, visualStiffnessMultiplier))
                         .setStartValue(startPrimaryTranslation)
                 primarySpring.addUpdateListener { _, value, _ ->
                     currentAnimatedPrimaryTranslations[taskView.taskViewId] = value
@@ -434,7 +440,12 @@ constructor(
                 taskView.scaleX = startScaleX
                 val scaleXSpring =
                     SpringAnimation(taskView, DynamicAnimation.SCALE_X)
-                        .setSpring(createExpressiveGridReflowSpringForce(targetScaleX))
+                        .setSpring(
+                            createLockedTaskVisualSpringForce(
+                                targetScaleX,
+                                visualStiffnessMultiplier,
+                            )
+                        )
                         .setStartValue(startScaleX)
                 scaleXSpring.addUpdateListener { _, value, _ ->
                     currentAnimatedScalesX[taskView.taskViewId] = value
@@ -453,7 +464,12 @@ constructor(
                 taskView.scaleY = startScaleY
                 val scaleYSpring =
                     SpringAnimation(taskView, DynamicAnimation.SCALE_Y)
-                        .setSpring(createExpressiveGridReflowSpringForce(targetScaleY))
+                        .setSpring(
+                            createLockedTaskVisualSpringForce(
+                                targetScaleY,
+                                visualStiffnessMultiplier,
+                            )
+                        )
                         .setStartValue(startScaleY)
                 scaleYSpring.addUpdateListener { _, value, _ ->
                     currentAnimatedScalesY[taskView.taskViewId] = value
@@ -502,7 +518,8 @@ constructor(
         val centerX = taskView.left + taskView.width / 2f
         val centerY = taskView.top + taskView.height / 2f
         return recentsView.pagedOrientationHandler.getPrimaryValue(centerX, centerY) +
-            taskView.primaryDismissTranslationProperty.get(taskView)
+            taskView.primaryDismissTranslationProperty.get(taskView) -
+            recentsView.pagedOrientationHandler.getPrimaryScroll(recentsView)
     }
 
     /** Bounce neighboring tasks due to a canceled dismiss or the reflow of tasks after dismiss. */
@@ -1488,6 +1505,27 @@ constructor(
             )
     }
 
+    private fun createLockedTaskVisualSpringForce(
+        finalPosition: Float,
+        stiffnessMultiplier: Float,
+    ): SpringForce {
+        val resourceProvider = DynamicResource.provider(recentsView.mContainer)
+        return SpringForce(finalPosition)
+            .setDampingRatio(
+                if (recentsView.isStackRecentsStyleActive) {
+                    STACK_STYLE_REFLOW_DAMPING_RATIO
+                } else {
+                    resourceProvider.getFloat(
+                        R.dimen.expressive_dismiss_task_trans_x_damping_ratio
+                    )
+                }
+            )
+            .setStiffness(
+                resourceProvider.getFloat(R.dimen.expressive_dismiss_task_trans_x_stiffness) *
+                    stiffnessMultiplier
+            )
+    }
+
     private fun createExpressiveGridReflowSpringForce(
         finalPosition: Float = Float.MAX_VALUE
     ): SpringForce {
@@ -1691,6 +1729,8 @@ constructor(
         // The additional damping to apply to tasks further from the dismissed task.
         private const val ADDITIONAL_DISMISS_DAMPING_RATIO = 0.15f
         private const val STACK_STYLE_REFLOW_DAMPING_RATIO = 1f
+        private const val LOCKED_TASK_LEFT_VISUAL_STIFFNESS_MULTIPLIER = 0.10f
+        private const val LOCKED_TASK_RIGHT_VISUAL_STIFFNESS_MULTIPLIER = 0.15f
         private const val RECENTS_SCALE_SPRING_MULTIPLIER = 1000f
         private const val DEFAULT_DISMISS_THRESHOLD_FRACTION = 0.5f
         private const val SPEED_UP_STIFFNESS = 100_000f
