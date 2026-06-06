@@ -968,6 +968,7 @@ public abstract class RecentsView<
             performMemoryBoost();
             return true;
         });
+        updateStockClearAllInteraction();
 
         if (DesktopModeStatus.isMultipleDesktopFrontendEnabledOnDisplay(mContext,
                 mContainer.getDisplay())) {
@@ -1083,12 +1084,37 @@ public abstract class RecentsView<
     public void updateClearAllFunction() {
         if (mFilterState.isFiltered()) {
             mClearAllButton.setText(R.string.recents_back);
-            mClearAllButton.setOnClickListener((view) -> {
-                this.setAndApplyFilter(null);
-            });
         } else {
             mClearAllButton.setText(R.string.recents_clear_all);
-            mClearAllButton.setOnClickListener(this::dismissAllTasks);
+        }
+        updateStockClearAllInteraction();
+    }
+
+    private void updateStockClearAllInteraction() {
+        boolean useOverviewActionsClearAll = LauncherPrefs.RECENTS_CLEAR_ALL.get(getContext())
+                && !mFilterState.isFiltered();
+        if (useOverviewActionsClearAll) {
+            mClearAllButton.setOnClickListener(null);
+            mClearAllButton.setOnLongClickListener(null);
+            mClearAllButton.setClickable(false);
+            mClearAllButton.setLongClickable(false);
+            mClearAllButton.setFocusable(false);
+            mClearAllButton.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        } else {
+            if (mFilterState.isFiltered()) {
+                mClearAllButton.setOnClickListener(view -> setAndApplyFilter(null));
+                mClearAllButton.setOnLongClickListener(null);
+            } else {
+                mClearAllButton.setOnClickListener(this::dismissAllTasks);
+                mClearAllButton.setOnLongClickListener(view -> {
+                    performMemoryBoost();
+                    return true;
+                });
+            }
+            mClearAllButton.setClickable(true);
+            mClearAllButton.setLongClickable(!mFilterState.isFiltered());
+            mClearAllButton.setFocusable(true);
+            mClearAllButton.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
         }
     }
 
@@ -1282,6 +1308,8 @@ public abstract class RecentsView<
                     updateOverlapState();
                     resetTaskVisuals();
                     requestLayout();
+                } else if (LauncherPrefs.RECENTS_CLEAR_ALL.getSharedPrefKey().equals(key)) {
+                    updateStockClearAllInteraction();
                 } else if (LauncherPrefs.RECENTS_TASK_CORNER_RADIUS.getSharedPrefKey()
                         .equals(key)) {
                     for (TaskView taskView : getTaskViews()) {
@@ -1334,6 +1362,7 @@ public abstract class RecentsView<
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         updateOverlapState();
+        updateStockClearAllInteraction();
         updateTaskStackListenerState();
         mModel.getThumbnailCache().getHighResLoadingState().addCallback(this);
         TaskStackChangeListeners.getInstance().registerTaskStackListener(mTaskStackListener);
