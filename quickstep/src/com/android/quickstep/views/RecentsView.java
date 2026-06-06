@@ -94,6 +94,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.LocusId;
 import android.content.pm.LauncherApps;
+import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.BlendMode;
@@ -151,6 +152,7 @@ import com.android.launcher3.AbstractFloatingView;
 import com.android.launcher3.BuildConfig;
 import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.Insettable;
+import com.android.launcher3.LauncherPrefs;
 import com.android.launcher3.MotionEventsUtils;
 import com.android.launcher3.PagedView;
 import com.android.launcher3.R;
@@ -955,6 +957,7 @@ public abstract class RecentsView<
             performMemoryBoost();
             return true;
         });
+        updateStockClearAllInteraction();
 
         if (DesktopModeStatus.isMultipleDesktopFrontendEnabledOnDisplay(mContext,
                 mContainer.getDisplay())) {
@@ -1070,12 +1073,37 @@ public abstract class RecentsView<
     public void updateClearAllFunction() {
         if (mFilterState.isFiltered()) {
             mClearAllButton.setText(R.string.recents_back);
-            mClearAllButton.setOnClickListener((view) -> {
-                this.setAndApplyFilter(null);
-            });
         } else {
             mClearAllButton.setText(R.string.recents_clear_all);
-            mClearAllButton.setOnClickListener(this::dismissAllTasks);
+        }
+        updateStockClearAllInteraction();
+    }
+
+    private void updateStockClearAllInteraction() {
+        boolean useOverviewActionsClearAll = LauncherPrefs.RECENTS_CLEAR_ALL.get(getContext())
+                && !mFilterState.isFiltered();
+        if (useOverviewActionsClearAll) {
+            mClearAllButton.setOnClickListener(null);
+            mClearAllButton.setOnLongClickListener(null);
+            mClearAllButton.setClickable(false);
+            mClearAllButton.setLongClickable(false);
+            mClearAllButton.setFocusable(false);
+            mClearAllButton.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        } else {
+            if (mFilterState.isFiltered()) {
+                mClearAllButton.setOnClickListener(view -> setAndApplyFilter(null));
+                mClearAllButton.setOnLongClickListener(null);
+            } else {
+                mClearAllButton.setOnClickListener(this::dismissAllTasks);
+                mClearAllButton.setOnLongClickListener(view -> {
+                    performMemoryBoost();
+                    return true;
+                });
+            }
+            mClearAllButton.setClickable(true);
+            mClearAllButton.setLongClickable(!mFilterState.isFiltered());
+            mClearAllButton.setFocusable(true);
+            mClearAllButton.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
         }
     }
 
@@ -1263,6 +1291,12 @@ public abstract class RecentsView<
         }
     }
 
+    private final SharedPreferences.OnSharedPreferenceChangeListener mPrefListener =
+            (prefs, key) -> {
+                if (LauncherPrefs.RECENTS_CLEAR_ALL.getSharedPrefKey().equals(key)) {
+                    updateStockClearAllInteraction();
+                }
+            };
     public void init(OverviewActionsView actionsView, SplitSelectStateController splitController,
             @Nullable DesktopRecentsTransitionController desktopRecentsTransitionController,
             MemInfoView memInfoView) {
@@ -1297,6 +1331,7 @@ public abstract class RecentsView<
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        updateStockClearAllInteraction();
         updateTaskStackListenerState();
         mModel.getThumbnailCache().getHighResLoadingState().addCallback(this);
         TaskStackChangeListeners.getInstance().registerTaskStackListener(mTaskStackListener);
@@ -1313,6 +1348,8 @@ public abstract class RecentsView<
         if (mDesktopVisibilityController != null) {
             mDesktopVisibilityController.registerDesktopVisibilityListener(mUtils);
         }
+        LauncherPrefs.getPrefs(getContext())
+                .registerOnSharedPreferenceChangeListener(mPrefListener);
     }
 
     @Override
@@ -1335,6 +1372,8 @@ public abstract class RecentsView<
         if (mDesktopVisibilityController != null) {
             mDesktopVisibilityController.unregisterDesktopVisibilityListener(mUtils);
         }
+        LauncherPrefs.getPrefs(getContext())
+                .unregisterOnSharedPreferenceChangeListener(mPrefListener);
         mTaskLaunchListener = null;
         mOnTaskLaunchCancelledRunnable = null;
         reset();
