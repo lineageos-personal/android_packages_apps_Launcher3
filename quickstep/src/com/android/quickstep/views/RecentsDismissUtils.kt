@@ -363,9 +363,6 @@ constructor(
     }
 
     private fun captureTaskVisualStates(taskViews: List<TaskView>): Map<Int, TaskVisualState> {
-        if (com.android.launcher3.LauncherPrefs.RECENTS_STYLE.get(recentsView.context) == "default") {
-            return emptyMap()
-        }
         return taskViews.associate { taskView ->
             taskView.taskViewId to
                 TaskVisualState(
