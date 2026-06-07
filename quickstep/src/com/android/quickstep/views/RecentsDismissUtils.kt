@@ -1262,6 +1262,19 @@ constructor(
                 }
             }
 
+            // Finishing the live tile resets its TaskView transform before the callback runs.
+            // Hide the off-screen fallback for the last default-style task so it cannot flash at
+            // its original position during that handoff.
+            val hideSingleTaskFallback =
+                dismissedTaskView != null &&
+                    taskViewCount == 1 &&
+                    com.android.launcher3.LauncherPrefs.RECENTS_STYLE.get(context) == "default" &&
+                    enableDrawingLiveTile &&
+                    dismissedTaskView.isRunningTask
+            if (hideSingleTaskFallback) {
+                dismissedTaskView?.alpha = 0f
+            }
+
             // Run the final page snapping and relayout
             if (enableDrawingLiveTile && dismissedTaskView?.isRunningTask == true) {
                 finishRecentsAnimation(/* toHome */ true, /* shouldPip */ false, onFinishComplete)
