@@ -1152,6 +1152,18 @@ constructor(
                 }
             }
 
+            // Finishing the live tile resets its TaskView transform before the callback runs.
+            // Hide the off-screen fallback for the last task so it cannot flash at its original
+            // position during that handoff.
+            val hideSingleTaskFallback =
+                dismissedTaskView != null &&
+                    taskViewCount == 1 &&
+                    enableDrawingLiveTile &&
+                    dismissedTaskView.isRunningTask
+            if (hideSingleTaskFallback) {
+                dismissedTaskView?.alpha = 0f
+            }
+
             // Run the final page snapping and relayout
             if (enableDrawingLiveTile && dismissedTaskView?.isRunningTask == true) {
                 finishRecentsAnimation(/* toHome */ true, /* shouldPip */ false, onFinishComplete)
