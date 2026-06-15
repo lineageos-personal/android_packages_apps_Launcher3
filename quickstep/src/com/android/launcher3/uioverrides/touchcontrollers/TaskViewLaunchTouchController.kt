@@ -62,7 +62,7 @@ CONTAINER : RecentsViewContainer {
     private var dragMode = DragMode.REST
     private var canInterceptTouch = false
     private var wasLockedBeforeDrag = false
-    private var hasLockThresholdHapticRun = false
+    private var hapticThresholdState = HapticThresholdState.CANCEL
 
     private fun canTaskLockTaskView(taskView: TaskView?) =
         taskView != null && DisplayController.getNavigationMode(container).hasGestures
@@ -167,7 +167,7 @@ CONTAINER : RecentsViewContainer {
         taskBeingDragged.translationZ = 0.1f
 
         wasLockedBeforeDrag = taskBeingDragged.isLocked
-        hasLockThresholdHapticRun = false
+        hapticThresholdState = HapticThresholdState.CANCEL
         dragMode = DragMode.REST
 
         showLockPill(wasLockedBeforeDrag)
@@ -181,14 +181,12 @@ CONTAINER : RecentsViewContainer {
             when {
                 displacementAbs < CANCEL_DISPLACEMENT_EPSILON -> {
                     dragMode = DragMode.REST
-                    hasLockThresholdHapticRun = false
                     hideLockPill()
                     taskBeingDragged.isBeingDraggedForDismissal = false
                     0f
                 }
                 isGoingUp -> {
                     dragMode = DragMode.DISMISS
-                    hasLockThresholdHapticRun = false
                     hideLockPill()
                     taskBeingDragged.isBeingDraggedForDismissal = true
                     boundToRange(displacementAbs, 0f, dismissLength.toFloat()) * dismissVerticalFactor
@@ -210,26 +208,26 @@ CONTAINER : RecentsViewContainer {
             }
             recentsView.redrawLiveTile()
         }
-        if (dragMode == DragMode.LOCK) {
-            playLockThresholdHaptic(displacement)
-        }
+        updateThresholdHaptic(displacementAbs)
         return true
     }
 
-    private fun playLockThresholdHaptic(displacement: Float) {
-        val lockThreshold = (LOCK_THRESHOLD_FRACTION * maxLockDisplacement)
-        val lockThresholdAbs = abs(lockThreshold)
-        val displacementAbs = abs(displacement)
-        val inHapticRange =
-            displacementAbs >= (lockThresholdAbs - LOCK_THRESHOLD_HAPTIC_RANGE) &&
-                displacementAbs <= (lockThresholdAbs + LOCK_THRESHOLD_HAPTIC_RANGE)
-        if (!inHapticRange) {
-            hasLockThresholdHapticRun = false
-        } else if (!hasLockThresholdHapticRun) {
-            MSDLPlayerWrapper.INSTANCE.get(recentsView.context)
-                .playToken(MSDLToken.SWIPE_THRESHOLD_INDICATOR)
-            hasLockThresholdHapticRun = true
-        }
+    private fun updateThresholdHaptic(displacementAbs: Float) {
+        val newState =
+            when {
+                dragMode == DragMode.LOCK &&
+                    displacementAbs >= abs(LOCK_THRESHOLD_FRACTION * maxLockDisplacement) ->
+                    HapticThresholdState.LOCK
+                dragMode == DragMode.DISMISS &&
+                    displacementAbs >= DISMISS_THRESHOLD_FRACTION * dismissLength ->
+                    HapticThresholdState.DISMISS
+                else -> HapticThresholdState.CANCEL
+            }
+        if (newState == hapticThresholdState) return
+
+        hapticThresholdState = newState
+        MSDLPlayerWrapper.INSTANCE.get(recentsView.context)
+            .playToken(MSDLToken.SWIPE_THRESHOLD_INDICATOR)
     }
 
     override fun onDragEnd(velocity: Float) {
@@ -327,6 +325,7 @@ CONTAINER : RecentsViewContainer {
         }
         hideLockPill()
         dragMode = DragMode.REST
+        hapticThresholdState = HapticThresholdState.CANCEL
         taskBeingDragged = null
     }
 
@@ -336,11 +335,16 @@ CONTAINER : RecentsViewContainer {
         DISMISS,
     }
 
+    private enum class HapticThresholdState {
+        LOCK,
+        CANCEL,
+        DISMISS,
+    }
+
     companion object {
         private const val TAG = "TaskViewLaunchTouchController"
         private const val LOCK_DISPLACEMENT_FRACTION = 0.4f
         private const val LOCK_THRESHOLD_FRACTION = 0.5f
-        private const val LOCK_THRESHOLD_HAPTIC_RANGE = 10f
         private const val DISMISS_THRESHOLD_FRACTION = 0.5f
         private const val CANCEL_DISPLACEMENT_EPSILON = 1f
         private const val RECENTS_SCALE_ON_DISMISS_SUCCESS = 0.975f
